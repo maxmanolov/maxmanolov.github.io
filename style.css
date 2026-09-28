@@ -1,0 +1,56 @@
+:root {
+  font-family: "Geist Mono", "SFMono-Regular", Consolas, "Liberation Mono",
+    monospace;
+  background-color: rgb(245, 244, 238);
+  color: #000;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+}
+
+body {
+  display: grid;
+  min-height: 100vh;
+  min-height: 100svh;
+  margin: 0;
+  place-items: center;
+  background-color: rgb(245, 244, 238);
+}
+
+main {
+  display: flex;
+  width: min(100%, 40rem);
+  padding: 2rem clamp(1.5rem, 5vw, 3.5rem);
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+  text-align: center;
+}
+
+h1,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(2rem, 4vw, 3.5rem);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+}
+
+p {
+  max-width: 50ch;
+  font-size: clamp(0.95rem, 1.1vw, 1.0625rem);
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: -0.01em;
+}
