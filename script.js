@@ -816,6 +816,23 @@ for (const type of ["pointerup", "pointercancel"]) {
 document.addEventListener("pointerout", (event) => {
   if (!event.relatedTarget) releasePointer();
 });
+
+// Browsers cancel pointer events once a finger drag turns into a pan, but touch
+// events keep coming, so a drag tilts and relights the chip on phones.
+window.addEventListener("touchmove", (event) => {
+  const touch = event.touches[0];
+  if (!touch) return;
+  pointer.clientX = touch.clientX;
+  pointer.clientY = touch.clientY;
+  pointer.inside = true;
+  requestChipFrame();
+}, { passive: true });
+
+for (const type of ["touchend", "touchcancel"]) {
+  window.addEventListener(type, (event) => {
+    if (event.touches.length === 0) releasePointer();
+  }, { passive: true });
+}
 window.addEventListener("blur", releasePointer);
 
 function wrapDegrees(angle) {
@@ -892,31 +909,11 @@ function listenForOrientation() {
   window.addEventListener("orientationchange", resetOrientation);
 }
 
-// iOS only allows motion access after the visitor taps, so the first tap on
-// the page (outside links) asks for it.
-function askForMotionOnTap() {
-  let asking = false;
-  const askForMotion = (event) => {
-    if (asking || event.target.closest?.("a")) return;
-    asking = true;
-    DeviceOrientationEvent.requestPermission()
-      .then((state) => {
-        window.removeEventListener("touchend", askForMotion);
-        window.removeEventListener("click", askForMotion);
-        if (state === "granted") listenForOrientation();
-      })
-      .catch(() => {
-        asking = false;
-      });
-  };
-  window.addEventListener("touchend", askForMotion, { passive: true });
-  window.addEventListener("click", askForMotion);
-}
-
-// Listening is harmless where access has not been granted yet: no events arrive.
-if (window.DeviceOrientationEvent) listenForOrientation();
-if (typeof window.DeviceOrientationEvent?.requestPermission === "function" && navigator.maxTouchPoints > 0) {
-  askForMotionOnTap();
+// Only browsers that share motion freely (such as Android Chrome) get the
+// wiggle; iOS would show a permission prompt, so the site never asks there and
+// iPhones tilt the chip with a finger drag instead.
+if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission !== "function") {
+  listenForOrientation();
 }
 
 window.addEventListener("resize", () => {
