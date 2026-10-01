@@ -65,6 +65,11 @@ const BASE_ELEVATION = 0.64;
 const YAW_RANGE = 0.09;
 const ELEVATION_RANGE = 0.045;
 const CAMERA_EASE = 0.1;
+// Phone tilt: degrees of movement for a full tilt, and how quickly (seconds)
+// the resting angle recentres, so the chip wiggles as the phone moves and
+// settles when it is held still.
+const MOTION_RANGE = 8;
+const MOTION_RECENTER = 1.2;
 const LIGHT_EASE = 0.085;
 const LIGHT_RADIUS = 1.05;
 const LIGHT_PEAK = 0.62;
@@ -270,6 +275,15 @@ const pointer = {
   clientY: 0,
   inside: false,
 };
+const motion = {
+  x: 0,
+  y: 0,
+  rawX: 0,
+  rawY: 0,
+  restX: 0,
+  restY: 0,
+  ready: false,
+};
 const view = {
   tiltX: 0,
   tiltY: 0,
@@ -376,6 +390,12 @@ function resizeChipCanvas() {
   const bottomReach = reach * steepest + (PIN_DEPTH - substrate.z0) * Math.cos(BASE_ELEVATION - ELEVATION_RANGE);
   const margin = 12;
   let restY = Math.min(gapY, viewportHeight * 0.56) + dieLift;
+  // Tall phones have open space below the card: the die sits there, clear of
+  // the reading veil, with the package rising behind the content.
+  const dieReach = (die.x1 * Math.sin(BASE_YAW) + die.y1 * Math.cos(BASE_YAW)) * Math.sin(BASE_ELEVATION) * cssScale;
+  const cardBottom = contributionCard.getBoundingClientRect().bottom + scrollTop;
+  const room = viewportHeight - cardBottom - dieReach * 2 - 12;
+  if (compact && room >= 0) restY = cardBottom + 12 + dieReach + room / 2 + dieLift;
   if (!compact && (topReach + bottomReach) * cssScale < viewportHeight - margin * 2) {
     restY = Math.max(topReach * cssScale + margin, Math.min(viewportHeight - bottomReach * cssScale - margin, restY));
   }
@@ -701,8 +721,9 @@ function easeToward(current, target, amount, epsilon) {
 function stepChip(delta, now) {
   const cameraAmount = 1 - Math.exp(-delta / CAMERA_EASE);
   const lightAmount = 1 - Math.exp(-delta / LIGHT_EASE);
-  const targetX = pointer.inside ? (pointer.clientX / viewportWidth - 0.5) * 2 : 0;
-  const targetY = pointer.inside ? (pointer.clientY / viewportHeight - 0.5) * 2 : 0;
+  stepMotion(delta);
+  const targetX = pointer.inside ? (pointer.clientX / viewportWidth - 0.5) * 2 : motion.x;
+  const targetY = pointer.inside ? (pointer.clientY / viewportHeight - 0.5) * 2 : motion.y;
   const clampedX = Math.max(-1, Math.min(1, targetX));
   const clampedY = Math.max(-1, Math.min(1, targetY));
 
@@ -729,6 +750,8 @@ function stepChip(delta, now) {
   }
 
   return waving
+    || motion.restX !== motion.rawX
+    || motion.restY !== motion.rawY
     || view.tiltX !== clampedX
     || view.tiltY !== clampedY
     || view.relight !== clampedX
@@ -794,6 +817,107 @@ document.addEventListener("pointerout", (event) => {
   if (!event.relatedTarget) releasePointer();
 });
 window.addEventListener("blur", releasePointer);
+
+function wrapDegrees(angle) {
+  return ((((angle + 180) % 360) + 360) % 360) - 180;
+}
+
+// Device orientation mapped to the screen's current rotation: x rolls the
+// right edge down, y tips the top edge up. Tilt is measured from a resting
+// angle that slowly follows the phone.
+function readOrientation(event) {
+  if (event.beta === null || event.gamma === null) return;
+  const rotation = screen.orientation?.angle ?? window.orientation ?? 0;
+  let x = event.gamma;
+  let y = event.beta;
+  switch (((Math.round(rotation / 90) % 4) + 4) % 4) {
+    case 1:
+      x = event.beta;
+      y = -event.gamma;
+      break;
+    case 2:
+      x = -event.gamma;
+      y = -event.beta;
+      break;
+    case 3:
+      x = -event.beta;
+      y = event.gamma;
+      break;
+  }
+
+  if (motion.ready) {
+    const stepX = wrapDegrees(x - motion.rawX);
+    const stepY = wrapDegrees(y - motion.rawY);
+    // Ignore sensor jitter so a phone lying still lets the chip come to rest.
+    if (Math.abs(stepX) + Math.abs(stepY) < 0.15) return;
+    // Near upright the angles can flip; start again from the new reading.
+    if (Math.abs(stepX) > 45 || Math.abs(stepY) > 45) motion.ready = false;
+  }
+  if (!motion.ready) {
+    motion.restX = x;
+    motion.restY = y;
+    motion.ready = true;
+  }
+  motion.rawX = x;
+  motion.rawY = y;
+  requestChipFrame();
+}
+
+function easeAngle(current, target, amount) {
+  const difference = wrapDegrees(target - current);
+  return Math.abs(difference) < 0.05 ? target : current + difference * amount;
+}
+
+// Tilt is the phone's movement away from its resting angle, which follows the
+// phone over MOTION_RECENTER seconds; this runs per frame so it settles even
+// when the sensor goes quiet.
+function stepMotion(delta) {
+  if (!motion.ready) return;
+  const follow = 1 - Math.exp(-delta / MOTION_RECENTER);
+  motion.restX = easeAngle(motion.restX, motion.rawX, follow);
+  motion.restY = easeAngle(motion.restY, motion.rawY, follow);
+  motion.x = Math.max(-1, Math.min(1, wrapDegrees(motion.rawX - motion.restX) / MOTION_RANGE));
+  motion.y = Math.max(-1, Math.min(1, wrapDegrees(motion.rawY - motion.restY) / MOTION_RANGE));
+}
+
+function resetOrientation() {
+  motion.ready = false;
+  motion.x = 0;
+  motion.y = 0;
+  requestChipFrame();
+}
+
+function listenForOrientation() {
+  window.addEventListener("deviceorientation", readOrientation);
+  window.addEventListener("orientationchange", resetOrientation);
+}
+
+// iOS only allows motion access after the visitor taps, so the first tap on
+// the page (outside links) asks for it.
+function askForMotionOnTap() {
+  let asking = false;
+  const askForMotion = (event) => {
+    if (asking || event.target.closest?.("a")) return;
+    asking = true;
+    DeviceOrientationEvent.requestPermission()
+      .then((state) => {
+        window.removeEventListener("touchend", askForMotion);
+        window.removeEventListener("click", askForMotion);
+        if (state === "granted") listenForOrientation();
+      })
+      .catch(() => {
+        asking = false;
+      });
+  };
+  window.addEventListener("touchend", askForMotion, { passive: true });
+  window.addEventListener("click", askForMotion);
+}
+
+// Listening is harmless where access has not been granted yet: no events arrive.
+if (window.DeviceOrientationEvent) listenForOrientation();
+if (typeof window.DeviceOrientationEvent?.requestPermission === "function" && navigator.maxTouchPoints > 0) {
+  askForMotionOnTap();
+}
 
 window.addEventListener("resize", () => {
   resizeChipCanvas();

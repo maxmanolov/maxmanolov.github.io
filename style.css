@@ -35,6 +35,15 @@ body {
   pointer-events: none;
 }
 
+/* On phones the chip runs off the bottom edge; fade it so browser toolbars
+   that float over the page never show a hard cut. */
+@media (max-width: 40rem) {
+  #chip-background {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 3rem), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 3rem), transparent);
+  }
+}
+
 main {
   position: relative;
   z-index: 1;
