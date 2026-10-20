@@ -19,7 +19,10 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v5
+      - name: Check out the site
+        run: |
+          gh repo clone "$GITHUB_REPOSITORY" . -- --depth 1
+          gh auth setup-git
 
       # The last 14 weeks of contributions, Sunday-aligned, as
       # {"total": n, "days": [[date, count, level], ...]}.
