@@ -132,7 +132,7 @@ h2 {
 .months,
 .graph {
   display: grid;
-  grid-template-columns: repeat(14, var(--cell-size));
+  grid-template-columns: repeat(var(--weeks, 14), var(--cell-size));
   column-gap: var(--cell-gap);
 }
 
@@ -141,18 +141,6 @@ h2 {
   color: #82837e;
   font-size: 0.469rem;
   line-height: 1;
-}
-
-.months span:nth-child(1) {
-  grid-column: 1 / span 5;
-}
-
-.months span:nth-child(2) {
-  grid-column: 6 / span 4;
-}
-
-.months span:nth-child(3) {
-  grid-column: 10 / span 5;
 }
 
 .graph {

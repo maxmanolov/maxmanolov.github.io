@@ -1,55 +1,61 @@
-// Public GitHub contribution snapshot refreshed September 28, 2026.
-const contributions = {
-  "2026-07-13": [6, 1],
-  "2026-07-14": [1, 1],
-  "2026-07-18": [14, 1],
-  "2026-07-24": [5, 1],
-  "2026-07-27": [14, 1],
-  "2026-07-28": [65, 3],
-  "2026-07-30": [133, 4],
-  "2026-07-31": [103, 4],
-  "2026-08-01": [10, 1],
-  "2026-08-02": [71, 3],
-  "2026-08-03": [1, 1],
-  "2026-08-04": [27, 2],
-  "2026-08-05": [160, 4],
-  "2026-08-06": [91, 4],
-  "2026-08-07": [47, 2],
-  "2026-08-08": [33, 2],
-  "2026-08-09": [18, 1],
-  "2026-08-10": [6, 1],
-  "2026-08-11": [3, 1],
-  "2026-08-15": [86, 4],
-  "2026-08-16": [36, 2],
-  "2026-09-03": [16, 1],
-  "2026-09-05": [15, 1],
-  "2026-09-07": [11, 1],
-  "2026-09-21": [40, 2],
-};
-
+// Contribution data lives in contributions.json, refreshed daily by the
+// update-contributions workflow from GitHub's contribution calendar.
 const graph = document.querySelector("#graph");
-const start = new Date("2026-06-28T00:00:00Z");
-const end = new Date("2026-09-28T00:00:00Z");
+const monthRow = document.querySelector(".months");
+const contributionSummary = document.querySelector("#contribution-summary");
 const dateFormatter = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
   year: "numeric",
   timeZone: "UTC",
 });
+const monthFormatter = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" });
 
-for (const date = new Date(start); date <= end; date.setUTCDate(date.getUTCDate() + 1)) {
-  const isoDate = date.toISOString().slice(0, 10);
-  const [count = 0, level = 0] = contributions[isoDate] ?? [];
-  const cell = document.createElement("span");
-  const contributionLabel = `${count} contribution${count === 1 ? "" : "s"}`;
+function renderContributions({ total, days }) {
+  const weeks = Math.ceil(days.length / 7);
+  graph.parentElement.style.setProperty("--weeks", weeks);
+  contributionSummary.textContent = `${total.toLocaleString("en-US")} contributions in the last three months`;
 
-  cell.className = "day";
-  cell.dataset.level = level;
-  cell.title = `${contributionLabel} on ${dateFormatter.format(date)}`;
-  cell.setAttribute("role", "gridcell");
-  cell.setAttribute("aria-label", cell.title);
-  graph.append(cell);
+  const cells = days.map(([isoDate, count, level]) => {
+    const cell = document.createElement("span");
+    const label = `${count} contribution${count === 1 ? "" : "s"} on ${dateFormatter.format(new Date(`${isoDate}T00:00:00Z`))}`;
+    cell.className = "day";
+    cell.dataset.level = level;
+    cell.title = label;
+    cell.setAttribute("role", "gridcell");
+    cell.setAttribute("aria-label", label);
+    return cell;
+  });
+  graph.replaceChildren(...cells);
+
+  // A month label sits over the first week that starts in that month, skipping
+  // one that would crowd the next label.
+  const labels = [];
+  let previousMonth = -1;
+  for (let week = 0; week < weeks; week++) {
+    const date = new Date(`${days[week * 7][0]}T00:00:00Z`);
+    if (date.getUTCMonth() !== previousMonth) labels.push({ week, date });
+    previousMonth = date.getUTCMonth();
+  }
+  if (labels.length > 1 && labels[1].week - labels[0].week < 3) labels.shift();
+  monthRow.replaceChildren(...labels.map(({ week, date }, index) => {
+    const span = document.createElement("span");
+    const next = labels[index + 1]?.week ?? weeks;
+    span.textContent = monthFormatter.format(date);
+    span.style.gridColumn = `${week + 1} / ${next + 1}`;
+    return span;
+  }));
+
+  // The card changed size, so the background re-measures what it should dim.
+  window.dispatchEvent(new Event("resize"));
 }
+
+fetch("contributions.json", { cache: "no-cache" })
+  .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
+  .then(renderContributions)
+  .catch(() => {
+    contributionSummary.textContent = "Contribution activity over the last three months";
+  });
 
 // ASCII exoplanet: a red star flaring over the cratered limb of a planet, drawn
 // as a fine character grid where every glyph is redrawn each frame. Per-cell
