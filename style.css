@@ -1,8 +1,9 @@
 :root {
   font-family: "Geist Mono", "SFMono-Regular", Consolas, "Liberation Mono",
     monospace;
-  background-color: rgb(245, 244, 238);
-  color: #000;
+  color-scheme: dark;
+  background-color: #000;
+  color: #ecece8;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -21,10 +22,10 @@ body {
   min-height: 100svh;
   margin: 0;
   overflow-x: hidden;
-  background-color: rgb(245, 244, 238);
+  background-color: #000;
 }
 
-#chip-background {
+#space {
   position: fixed;
   z-index: 0;
   inset: 0;
@@ -33,15 +34,6 @@ body {
   height: 100%;
   contain: strict;
   pointer-events: none;
-}
-
-/* On phones the chip runs off the bottom edge; fade it so browser toolbars
-   that float over the page never show a hard cut. */
-@media (max-width: 40rem) {
-  #chip-background {
-    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 3rem), transparent);
-    mask-image: linear-gradient(to bottom, #000 calc(100% - 3rem), transparent);
-  }
 }
 
 main {
@@ -72,19 +64,8 @@ a {
 }
 
 .intro {
-  position: relative;
   max-width: 54ch;
   text-align: center;
-}
-
-/* A soft reading veil keeps the bio legible over the chip drawing. */
-.intro::before {
-  position: absolute;
-  z-index: -1;
-  inset: -2.5rem clamp(-4rem, -5vw, -1rem);
-  background: radial-gradient(closest-side, rgba(245, 244, 238, 0.78) 45%, rgba(245, 244, 238, 0));
-  content: "";
-  pointer-events: none;
 }
 
 h1 {
@@ -108,9 +89,9 @@ h1 {
   width: min(100%, 23rem);
   margin-top: clamp(2.75rem, 7vh, 4rem);
   padding: clamp(1rem, 4vw, 1.35rem);
-  border: 1px solid #d8d7d1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 0.5rem;
-  background: rgba(245, 244, 238, 0.84);
+  background: rgba(0, 0, 0, 0.8);
   backdrop-filter: blur(0.1875rem);
   -webkit-backdrop-filter: blur(0.1875rem);
 }
@@ -131,7 +112,7 @@ h2 {
 
 .contributions-header p,
 .contributions-header a {
-  color: #5e5d58;
+  color: #9d9e99;
   font-size: 0.6875rem;
   line-height: 1.5;
 }
@@ -155,7 +136,7 @@ h2 {
 
 .months {
   margin-bottom: 0.4rem;
-  color: #77766f;
+  color: #82837e;
   font-size: 0.625rem;
   line-height: 1;
 }
@@ -182,7 +163,7 @@ h2 {
 .legend i {
   display: block;
   border-radius: 0.15rem;
-  background: #dddcd6;
+  background: #1d2026;
 }
 
 .day {
@@ -192,22 +173,22 @@ h2 {
 
 .day[data-level="1"],
 .legend i[data-level="1"] {
-  background: #a7d8b1;
+  background: #0e4429;
 }
 
 .day[data-level="2"],
 .legend i[data-level="2"] {
-  background: #62b77d;
+  background: #006d32;
 }
 
 .day[data-level="3"],
 .legend i[data-level="3"] {
-  background: #268f5a;
+  background: #26a641;
 }
 
 .day[data-level="4"],
 .legend i[data-level="4"] {
-  background: #0b633e;
+  background: #39d353;
 }
 
 .legend {
@@ -216,7 +197,7 @@ h2 {
   justify-content: flex-end;
   gap: 0.3rem;
   margin-top: 0.85rem;
-  color: #77766f;
+  color: #82837e;
   font-size: 0.625rem;
 }
 
@@ -227,13 +208,29 @@ h2 {
 
 .socials {
   display: flex;
-  gap: 1.25rem;
+  gap: 1.5rem;
   margin-top: 2rem;
-  font-size: 0.8125rem;
+}
+
+.socials a {
+  display: block;
+  padding: 0.25rem;
+  color: #b6b7b2;
+  transition: color 0.15s ease;
 }
 
 .socials a:hover,
-.socials a:focus-visible,
+.socials a:focus-visible {
+  color: #fff;
+}
+
+.socials svg {
+  display: block;
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: currentColor;
+}
+
 .contributions-header a:hover,
 .contributions-header a:focus-visible {
   text-decoration-thickness: 2px;
