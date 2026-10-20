@@ -88,6 +88,7 @@ let cellPxH = 12;
 let cols = 0;
 let rows = 0;
 let sun = { x: 0, y: 0, r: 1 };
+let hole = { x: 0, y: 0, r: 1 };
 let planet = { x: 0, y: 0, r: 1 };
 let skyLevels = new Uint8Array(0);
 let groundLevels = new Uint8Array(0);
@@ -96,11 +97,27 @@ let renderTimer = 0;
 let lastFrame = 0;
 const parallax = { x: 0, y: 0, targetX: 0, targetY: 0 };
 const meteors = [];
+// Stars slowly drawn into the black hole, spiralling in and stretching out.
+const infall = Array.from({ length: 34 }, () => spawnInfall({}, true));
+
+function spawnInfall(star, scattered) {
+  star.radius = 6 + Math.random() * 9;
+  star.angle = Math.random() * Math.PI * 2;
+  star.age = scattered ? Math.random() * 40 : 0;
+  star.brightness = 0.45 + Math.random() * 0.5;
+  // Spread the starting radius when the page loads, so they are not in sync.
+  if (scattered) star.radius = 2 + Math.random() * 13;
+  return star;
+}
 
 // Per-cell scene data.
 let kind = new Uint8Array(0);
 let calm = new Float32Array(0);
 let skyBase = new Float32Array(0);
+// Black hole cells: 1 horizon, 2 accretion disk or lensed arc (rotates), 3 photon ring.
+let holeKind = new Uint8Array(0);
+let holeAngle = new Float32Array(0);
+let holeRadius = new Float32Array(0);
 let rayId = new Int8Array(0);
 let rayLight = new Float32Array(0);
 let twinkle = new Float32Array(0);
@@ -162,9 +179,11 @@ function composeScene() {
   const H = viewHeight;
   if (W >= H * 1.1) {
     sun = { x: W * 0.74, y: H * 0.27, r: Math.min(W, H) * 0.045 };
+    hole = { x: W * 0.16, y: H * 0.17, r: Math.min(W, H) * 0.034 };
     planet = circleThrough(-W * 0.02, H * 0.44, W * 0.27, H * 0.64, W * 0.56, H * 1.06);
   } else {
     sun = { x: W * 0.72, y: H * 0.075, r: W * 0.055 };
+    hole = { x: W * 0.22, y: H * 0.085, r: W * 0.052 };
     planet = circleThrough(-W * 0.05, H * 0.72, W * 0.45, H * 0.8, W * 1.05, H * 1.02);
   }
 }
@@ -177,8 +196,86 @@ const RAYS = Array.from({ length: RAY_COUNT }, (_, k) => ({
   speed: 0.6 + hash(k, 13, 5) * 1.4,
 }));
 
+// The black hole's disk is tilted toward us: in disk coordinates a point sits
+// at radius rho (in horizon radii) and angle phi, seen squashed by DISK_SQUASH.
+const DISK_TILT = -0.32;
+const DISK_SQUASH = 0.21;
+const DISK_INNER = 1.5;
+const DISK_OUTER = 4.2;
+// The shadow: a ring of empty sky around the horizon where no starlight escapes.
+const SHADOW = 2.7;
+
+// Classifies one sky cell against the black hole; returns true when it is part
+// of the hole (horizon, ring, disk, lensed arcs, shadow) and fully described here.
+function describeHole(i, x, y) {
+  const dx = (x - hole.x) / hole.r;
+  const dy = (y - hole.y) / hole.r;
+  const d = Math.hypot(dx, dy);
+  holeKind[i] = 0;
+  if (d > DISK_OUTER + 0.5) return false;
+  const ax = dx * Math.cos(DISK_TILT) + dy * Math.sin(DISK_TILT);
+  const ay = -dx * Math.sin(DISK_TILT) + dy * Math.cos(DISK_TILT);
+  const rho = Math.hypot(ax, ay / DISK_SQUASH);
+  const onDisk = rho >= DISK_INNER && rho <= DISK_OUTER;
+  // Doppler beaming: the side swinging toward us (left) is brighter.
+  const beaming = 0.75 - 0.25 * (ax / Math.max(rho, 0.001));
+  // White-hot at the inner edge, fading quickly to dim orange gas.
+  const diskLight = (0.3 + 1.2 * Math.exp(-(rho - DISK_INNER) / 1.1)) * beaming;
+  holeAngle[i] = Math.atan2(ay / DISK_SQUASH, ax);
+  holeRadius[i] = rho;
+  if (onDisk && ay >= 0) {
+    // Near half of the disk, passing in front of the horizon.
+    holeKind[i] = 2;
+    skyBase[i] = diskLight;
+    return true;
+  }
+  if (d < 1) {
+    holeKind[i] = 1;
+    skyBase[i] = 0;
+    return true;
+  }
+  if (Math.abs(d - 1.06) < 0.05) {
+    // The photon ring: a fine bright line, not an outline.
+    holeKind[i] = 3;
+    holeAngle[i] = Math.atan2(dy, dx);
+    skyBase[i] = 0.8;
+    return true;
+  }
+  // Lensed images of the far disk: a bold band wrapping over the top of the
+  // horizon and a thinner, fainter one tucked under the bottom.
+  const above = ay < 0;
+  const bandOuter = above ? 2.35 : 1.55;
+  if (d > 1.1 && d < bandOuter) {
+    const width = above ? 0.6 : 0.22;
+    const peak = above ? 1.6 : 0.95;
+    holeKind[i] = 2;
+    holeAngle[i] = Math.atan2(dy, dx) * 2;
+    holeRadius[i] = 1.6 + (d - 1.1);
+    skyBase[i] = peak * Math.exp(-(d - 1.18) / width) * (0.75 - 0.25 * (dx / d));
+    return true;
+  }
+  if (onDisk) {
+    // Far half of the disk, behind the horizon.
+    holeKind[i] = 2;
+    skyBase[i] = diskLight * 0.9;
+    return true;
+  }
+  if (d < SHADOW) {
+    holeKind[i] = 1;
+    skyBase[i] = 0;
+    return true;
+  }
+  return false;
+}
+
 // Static sky light for one cell; the strongest ray is stored separately so it can pulse.
 function describeSky(i, x, y, c, r) {
+  if (describeHole(i, x, y)) {
+    rayId[i] = -1;
+    rayLight[i] = 0;
+    twinkle[i] = 0;
+    return;
+  }
   const dx = x - sun.x;
   const dy = y - sun.y;
   const d = Math.hypot(dx, dy) / sun.r;
@@ -209,11 +306,27 @@ function describeSky(i, x, y, c, r) {
   }
   const loner = Math.hypot(x - viewWidth * 0.09, y - viewHeight * 0.33);
   if (loner < cellW * 1.6) lum += 0.7 * (1 - loner / (cellW * 1.6));
-  const star = hash(c, r, 17);
+  // Starlight near the black hole is lensed: each cell shows the star that
+  // sits closer to the hole, as if bent around it, plus a faint warm haze.
+  let starC = c;
+  let starR = r;
+  const hx = x - hole.x;
+  const hy = y - hole.y;
+  const hd = Math.hypot(hx, hy);
+  if (hd < hole.r * 10) {
+    const einstein = (hole.r * 2.3) ** 2;
+    const source = hd - einstein / hd;
+    const sx = hole.x + (hx / hd) * source;
+    const sy = hole.y + (hy / hd) * source;
+    starC = Math.floor(((sx + MARGIN) * pixelRatio) / cellPxW);
+    starR = Math.floor(((sy + MARGIN) * pixelRatio) / cellPxH);
+    lum += 0.08 * Math.exp(-(hd / hole.r - SHADOW) / 1.6);
+  }
+  const star = hash(starC, starR, 17);
   twinkle[i] = 0;
   if (star > 0.9965) {
     lum = Math.max(lum, 0.35 + (star - 0.9965) * 170);
-    twinkle[i] = 1 + hash(c, r, 29) * 6;
+    twinkle[i] = 1 + hash(starC, starR, 29) * 6;
   }
   skyBase[i] = Math.min(lum, 1);
 }
@@ -302,6 +415,9 @@ function buildScene() {
   kind = new Uint8Array(cells);
   calm = new Float32Array(cells);
   skyBase = new Float32Array(cells);
+  holeKind = new Uint8Array(cells);
+  holeAngle = new Float32Array(cells);
+  holeRadius = new Float32Array(cells);
   rayId = new Int8Array(cells);
   rayLight = new Float32Array(cells);
   twinkle = new Float32Array(cells);
@@ -367,7 +483,15 @@ function lightCells(t, dt) {
     let skyLevel = 0;
     if (kind[i] & SKY) {
       let lum = skyBase[i];
-      if (lum >= 1) {
+      if (holeKind[i] === 2) {
+        // Keplerian swirl: inner material laps the outer, streaks drift round.
+        const spin = t * (2.4 / Math.pow(holeRadius[i], 1.5));
+        lum *= 0.8 + 0.2 * Math.sin(holeAngle[i] * 4 + holeRadius[i] * 2.5 - spin * 4);
+      } else if (holeKind[i] === 3) {
+        lum = skyBase[i] * (0.85 + 0.15 * Math.sin(t * 3 + holeAngle[i] * 3));
+      } else if (holeKind[i] === 1) {
+        lum = 0;
+      } else if (lum >= 1) {
         const tx = cellX[i] - transitX;
         const ty = cellY[i] - transitY;
         lum = tx * tx + ty * ty < transitR2 ? 0 : flicker;
@@ -395,6 +519,36 @@ function lightCells(t, dt) {
       groundLevel = (Math.min(1, lum * calm[i]) * top + 0.5) | 0;
     }
     groundLevels[i] = groundLevel;
+  }
+
+  // Infalling stars: slow far out, faster and flatter as they near the disk,
+  // stretched into a short streak along their path at the end.
+  for (const star of infall) {
+    star.age += dt;
+    const rr = star.radius;
+    star.radius -= dt * (0.06 + 0.9 / Math.pow(rr, 1.6));
+    star.angle += dt * (0.12 + 1.6 / Math.pow(rr, 1.5));
+    if (star.radius < 1.25) {
+      spawnInfall(star, false);
+      continue;
+    }
+    const flatten = 1 - 0.75 * clamp((6 - rr) / 5, 0, 1);
+    const fadeIn = Math.min(1, star.age / 3);
+    const lum = star.brightness * fadeIn * (0.7 + 0.3 * clamp((4 - rr) / 3, 0, 1));
+    const tail = rr < 3.2 ? 3 : 1;
+    for (let k = 0; k < tail; k++) {
+      const angle = star.angle - k * 0.08;
+      const px = Math.cos(angle) * star.radius;
+      const py = Math.sin(angle) * star.radius * flatten;
+      const x = hole.x + (px * Math.cos(DISK_TILT) - py * Math.sin(DISK_TILT)) * hole.r;
+      const y = hole.y + (px * Math.sin(DISK_TILT) + py * Math.cos(DISK_TILT)) * hole.r;
+      const c = Math.floor(((x + MARGIN) * pixelRatio) / cellPxW);
+      const r = Math.floor(((y + MARGIN) * pixelRatio) / cellPxH);
+      if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
+      const i = r * cols + c;
+      if (holeKind[i] === 1 && (y - hole.y) ** 2 + (x - hole.x) ** 2 < hole.r * hole.r) continue;
+      skyLevels[i] = Math.max(skyLevels[i], (lum * (1 - k * 0.3) * calm[i] * top) | 0);
+    }
   }
 
   // Meteors launched by clicks: a bright head and a fading tail of cells.
