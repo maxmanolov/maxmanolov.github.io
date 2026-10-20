@@ -44,10 +44,20 @@ main {
   min-height: 100vh;
   min-height: 100svh;
   margin: 0 auto;
-  padding: clamp(3rem, 9vh, 6rem) clamp(1.25rem, 5vw, 3rem);
+  /* A little more room above than below, so the column sits just under centre. */
+  padding: clamp(3.5rem, 14vh, 8rem) clamp(1.25rem, 5vw, 3rem) clamp(2rem, 6vh, 4rem);
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+}
+
+/* Auto margins centre the column vertically, and fall back to top-aligned
+   scrolling when a window is too short to fit it. */
+.intro {
+  margin-top: auto;
+}
+
+.socials {
+  margin-bottom: auto;
 }
 
 h1,
@@ -230,16 +240,5 @@ h2 {
   .contributions-header {
     flex-direction: column;
     gap: 0.4rem;
-  }
-}
-
-@media (max-height: 46rem) {
-  main {
-    justify-content: flex-start;
-    padding-block: 2.5rem;
-  }
-
-  .contributions {
-    margin-top: 1.875rem;
   }
 }
