@@ -16,17 +16,37 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-
+      # The last 14 weeks of contributions, Sunday-aligned, as
+      # {"total": n, "days": [[date, count, level], ...]}.
       - name: Fetch contribution data
-        run: node .github/scripts/update-contributions.mjs
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          from=$(date -u -d "-$(( $(date -u +%w) + 13 * 7 )) days" +%Y-%m-%dT00:00:00Z)
+          gh api graphql \
+            -f login=maxmanolov \
+            -f from="$from" \
+            -f to="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -f query='
+              query ($login: String!, $from: DateTime!, $to: DateTime!) {
+                user(login: $login) {
+                  contributionsCollection(from: $from, to: $to) {
+                    contributionCalendar {
+                      totalContributions
+                      weeks { contributionDays { date contributionCount contributionLevel } }
+                    }
+                  }
+                }
+              }' \
+            | jq -c '
+              {NONE: 0, FIRST_QUARTILE: 1, SECOND_QUARTILE: 2, THIRD_QUARTILE: 3, FOURTH_QUARTILE: 4} as $levels
+              | .data.user.contributionsCollection.contributionCalendar
+              | {total: .totalContributions,
+                 days: [.weeks[].contributionDays[] | [.date, .contributionCount, $levels[.contributionLevel]]]}' \
+            > contributions.json
 
       - name: Commit if changed
         id: commit
@@ -45,5 +65,3 @@ jobs:
       - name: Rebuild the site
         if: steps.commit.outputs.changed == 'true'
         run: gh api -X POST "repos/${{ github.repository }}/pages/builds"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
