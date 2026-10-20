@@ -45,7 +45,7 @@ main {
   min-height: 100svh;
   margin: 0 auto;
   /* A little more room above than below, so the column sits just under centre. */
-  padding: clamp(3.5rem, 14vh, 8rem) clamp(1.25rem, 5vw, 3rem) clamp(2rem, 6vh, 4rem);
+  padding: clamp(3rem, 11vh, 6.5rem) clamp(1.25rem, 5vw, 3rem) clamp(2.5rem, 9vh, 5.5rem);
   flex-direction: column;
   align-items: center;
 }

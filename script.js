@@ -194,6 +194,22 @@ function composeScene() {
   }
 }
 
+// Lowers the planet just enough that its limb passes below the card and the
+// links, so the surface never runs behind them in short, wide windows.
+function clearContent() {
+  let shift = 0;
+  for (const element of calmTargets.slice(2)) {
+    const rect = element.getBoundingClientRect();
+    for (let x = rect.left; x <= rect.right; x += 4) {
+      const across = x - planet.x;
+      if (Math.abs(across) >= planet.r) continue;
+      const limb = planet.y - Math.sqrt(planet.r * planet.r - across * across);
+      shift = Math.max(shift, rect.bottom + 14 - limb);
+    }
+  }
+  planet.y += shift;
+}
+
 // Rays: a fixed fan of spikes with their own lengths, like a camera's flare.
 const RAYS = Array.from({ length: RAY_COUNT }, (_, k) => ({
   angle: (k / RAY_COUNT) * Math.PI * 2 + (hash(k, 3, 5) - 0.5) * 0.4,
@@ -415,6 +431,7 @@ function buildScene() {
   cols = Math.ceil(((viewWidth + MARGIN * 2) * pixelRatio) / cellPxW);
   rows = Math.ceil(((viewHeight + MARGIN * 2) * pixelRatio) / cellPxH);
   composeScene();
+  clearContent();
   buildGlyphSheet();
 
   const cells = cols * rows;
