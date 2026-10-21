@@ -69,7 +69,7 @@ const calmTargets = [".intro h1", ".intro p", ".contributions", ".socials"].map(
 
 // Glyphs from empty to dense; a cell's brightness picks its glyph and colour.
 const RAMP = " .,:;-=+*x%#@";
-const LEVELS = 32;
+const LEVELS = 64;
 // Brightness → colour, from deep space red through orange to white-hot.
 // Each palette maps brightness to colour. A cell stores its palette in the
 // top two bits of its byte and its brightness level in the low six.
@@ -77,8 +77,6 @@ const SKY_PALETTE = 0;
 const WATER_PALETTE = 1;
 const LAND_PALETTE = 2;
 const HOLE_PALETTE = 3;
-const CLOUD_PALETTE = 4;
-const NEBULA_PALETTE = 5;
 const PALETTES = [
   // Sky and star: deep space red through orange to white-hot.
   [[0, 8, 2, 1], [0.2, 74, 20, 7], [0.45, 176, 64, 22], [0.7, 242, 134, 62], [0.88, 255, 204, 146], [1, 255, 246, 228]],
@@ -88,18 +86,9 @@ const PALETTES = [
   [[0, 3, 10, 4], [0.25, 16, 62, 22], [0.5, 46, 132, 48], [0.72, 110, 190, 72], [0.88, 196, 222, 128], [1, 246, 250, 226]],
   // Black hole: deep purple through violet and lavender to white.
   [[0, 6, 2, 14], [0.25, 46, 14, 92], [0.5, 112, 50, 196], [0.72, 176, 122, 244], [0.88, 222, 196, 255], [1, 255, 252, 255]],
-  // Clouds: shadowed grey to bright white.
-  [[0, 4, 6, 10], [0.3, 58, 66, 84], [0.6, 150, 160, 178], [0.85, 218, 224, 236], [1, 255, 255, 255]],
-  // Nebula: dark teal through blue to magenta dust.
-  [[0, 2, 4, 8], [0.12, 8, 34, 48], [0.24, 24, 54, 104], [0.36, 76, 46, 120], [0.5, 150, 70, 150], [1, 255, 200, 230]],
 ];
-// A cell's byte holds its palette in the top three bits and brightness in the low five.
-const PALETTE_SHIFT = 5;
-const LEVEL_MASK = 31;
-// Clouds cover roughly this share of the planet; the nebula's strip spans
-// this many screen widths before it repeats.
-const CLOUD_SHARE = 0.32;
-const NEBULA_SPAN = 2.5;
+const PALETTE_SHIFT = 6;
+const LEVEL_MASK = 63;
 // The share of the surface that is ocean, roughly Earth's.
 const OCEAN_SHARE = 0.62;
 let seaLevel = 0.5;
@@ -172,10 +161,6 @@ let normalZ = new Float32Array(0);
 let groundColumn = new Float32Array(0);
 let groundRow = new Uint16Array(0);
 let terrainStrip = new Float32Array(0);
-let cloudStrip = new Float32Array(0);
-// Background nebula: a wrapped field of dust, scrolled slower than the stars.
-let nebulaStrip = new Float32Array(0);
-let nebulaWidth = 1;
 let stripWidth = 1;
 let falloff = new Float32Array(0);
 let rimGlow = new Float32Array(0);
@@ -544,29 +529,6 @@ function buildScene() {
     }
   }
 
-  // Cloud cover on the same strip: soft-edged banks, stretched along the
-  // direction of spin like weather systems.
-  const rawClouds = new Float32Array(stripWidth * stripRows);
-  for (let row = 0; row < stripRows; row++) {
-    for (let column = 0; column < stripWidth; column++) {
-      rawClouds[row * stripWidth + column] = wrappedFbm(column / 4, (row / 8) * 1.8, 71, period);
-    }
-  }
-  const cloudLine = Float32Array.from(rawClouds).sort()[Math.floor(rawClouds.length * (1 - CLOUD_SHARE))];
-  cloudStrip = rawClouds.map((value) => clamp((value - cloudLine) / 0.08, 0, 1));
-
-  // The nebula: large, faint patches of dust in cell coordinates.
-  nebulaWidth = 48 * Math.ceil((cols * NEBULA_SPAN) / 48);
-  nebulaStrip = new Float32Array(nebulaWidth * rows);
-  for (let row = 0; row < rows; row++) {
-    for (let column = 0; column < nebulaWidth; column++) {
-      const dust = wrappedFbm(column / 48, row / 30, 61, nebulaWidth / 48);
-      const patches = wrappedNoise(column / 96, row / 60, 67, nebulaWidth / 96);
-      const density = clamp((dust - 0.5) / 0.22, 0, 1) * clamp((patches - 0.5) / 0.25, 0, 1);
-      nebulaStrip[row * nebulaWidth + column] = density * density;
-    }
-  }
-
   // Sea level sits at the terrain height that floods OCEAN_SHARE of the planet.
   const heights = Float32Array.from(terrainStrip).sort();
   seaLevel = heights[Math.floor(heights.length * OCEAN_SHARE)] || 0.5;
@@ -577,13 +539,9 @@ function buildScene() {
   else drawStaticFrame();
 }
 
-// Raises a cell's brightness level, keeping its palette (a star or meteor
-// passing over nebula dust takes the sky's colours).
+// Raises a cell's brightness level, keeping its palette.
 function brighten(value, level) {
-  const current = value & LEVEL_MASK;
-  if (level <= current) return value;
-  const palette = value >> PALETTE_SHIFT;
-  return ((palette === NEBULA_PALETTE ? SKY_PALETTE : palette) << PALETTE_SHIFT) | Math.min(level, LEVEL_MASK);
+  return (value & ~LEVEL_MASK) | Math.max(value & LEVEL_MASK, Math.min(level, LEVEL_MASK));
 }
 
 // Light from one star cell (0 when there is no star), twinkling on its own clock.
@@ -623,11 +581,6 @@ function lightCells(t, dt) {
   const farBlend = farTravel - farStep;
   const nearBlend = nearTravel - nearStep;
   const spinColumns = camera.spin * 4;
-  // Clouds drift a little faster than the ground; the nebula lags far behind the stars.
-  const cloudColumns = spinColumns * 1.35 + t * 0.5;
-  const nebulaTravel = camera.travel * 0.35;
-  const nebulaStep = Math.floor(nebulaTravel);
-  const nebulaBlend = nebulaTravel - nebulaStep;
   const cells = cols * rows;
 
   for (let i = 0; i < cells; i++) {
@@ -659,20 +612,8 @@ function lightCells(t, dt) {
           lum = Math.max(lum, far, near);
         }
       }
-      let skyPalette = holeKind[i] ? HOLE_PALETTE : SKY_PALETTE;
-      // Faint nebula dust behind everything else in open sky.
-      if (!holeKind[i] && lum < 0.3) {
-        const row = (i / cols) | 0;
-        const base = row * nebulaWidth;
-        const left = ((((i % cols) + nebulaStep) % nebulaWidth) + nebulaWidth) % nebulaWidth;
-        const right = (left + 1) % nebulaWidth;
-        const dust = (nebulaStrip[base + left] * (1 - nebulaBlend) + nebulaStrip[base + right] * nebulaBlend) * 0.55;
-        if (dust > lum) {
-          lum = dust;
-          skyPalette = NEBULA_PALETTE;
-        }
-      }
-      skyLevel = ((Math.min(1, lum * calm[i]) * top + 0.5) | 0) | (skyPalette << PALETTE_SHIFT);
+      skyLevel = ((Math.min(1, lum * calm[i]) * top + 0.5) | 0)
+        | ((holeKind[i] ? HOLE_PALETTE : SKY_PALETTE) << PALETTE_SHIFT);
     }
     skyLevels[i] = skyLevel;
 
@@ -704,21 +645,6 @@ function lightCells(t, dt) {
           palette = LAND_PALETTE;
           const sparkle = terrain > 1 ? 0.12 * Math.max(0, Math.sin(glint + cellX[i] * 0.05 + cellY[i] * 0.03)) : 0;
           surface = 0.5 + 0.8 * (terrain - seaLevel) + sparkle;
-        }
-        // Clouds float above the ground and shade what lies under them.
-        const cloudPosition = groundColumn[i] + cloudColumns;
-        const cloudColumn = Math.floor(cloudPosition);
-        const cloudBlend = cloudPosition - cloudColumn;
-        const cloudLeft = ((cloudColumn % stripWidth) + stripWidth) % stripWidth;
-        const cloudRight = (cloudLeft + 1) % stripWidth;
-        const cloud = cloudStrip[base + cloudLeft] * (1 - cloudBlend) + cloudStrip[base + cloudRight] * cloudBlend;
-        const shadowLeft = (cloudLeft + 3) % stripWidth;
-        const shadow = cloudStrip[base + shadowLeft];
-        if (cloud > 0.45) {
-          palette = CLOUD_PALETTE;
-          surface = 0.55 + 0.45 * cloud;
-        } else {
-          surface *= 1 - 0.35 * shadow;
         }
         lum = 0.04 + 1.05 * lit * falloff[i] * surface + rimGlow[i] * (0.3 + 0.7 * Math.max(0, facing));
       }
@@ -813,8 +739,8 @@ vec4 glyphAt(vec2 p, vec2 origin, sampler2D cells, out float level) {
   vec2 g = (p - origin) / cell;
   vec2 index = floor(g);
   float value = floor(texture2D(cells, (index + 0.5) / grid).r * 255.0 + 0.5);
-  float palette = floor(value / 32.0);
-  level = value - palette * 32.0;
+  float palette = floor(value / 64.0);
+  level = value - palette * 64.0;
   vec2 local = g - index;
   return texture2D(glyphs, vec2((level + local.x) / levels, (palette + local.y) / palettes));
 }
