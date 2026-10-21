@@ -123,6 +123,9 @@ const camera = { speed: 0, travel: 0, spin: 0 };
 const CRUISE = 7;
 const NEAR_LAYER = 2.4;
 const meteors = [];
+// Infall strength (in horizon radii and seconds) and the spin stars pick up.
+const INFALL_PULL = 5;
+const INFALL_SPIN = 10;
 // Stars slowly drawn into the black hole, spiralling in and stretching out.
 const infall = Array.from({ length: 34 }, () => spawnInfall({}, true));
 
@@ -131,6 +134,7 @@ function spawnInfall(star, scattered) {
   star.angle = Math.random() * Math.PI * 2;
   star.age = scattered ? Math.random() * 40 : 0;
   star.brightness = 0.45 + Math.random() * 0.5;
+  star.fall = 0;
   // Spread the starting radius when the page loads, so they are not in sync.
   if (scattered) star.radius = 2 + Math.random() * 13;
   return star;
@@ -649,13 +653,16 @@ function lightCells(t, dt) {
     groundLevels[i] = groundLevel;
   }
 
-  // Infalling stars: slow far out, faster and flatter as they near the disk,
-  // stretched into a short streak along their path at the end.
+  // Infalling stars accelerate: gravity grows as 1/r² and keeps adding to
+  // their inward speed, and they spin faster as they fall (angular momentum),
+  // so they drift for a while far out, then whip in, flattening into the disk
+  // and stretching into a streak at the end.
   for (const star of infall) {
     star.age += dt;
     const rr = star.radius;
-    star.radius -= dt * (0.06 + 0.9 / Math.pow(rr, 1.6));
-    star.angle += dt * (0.12 + 1.6 / Math.pow(rr, 1.5));
+    star.fall += (INFALL_PULL / (rr * rr)) * dt;
+    star.radius -= (0.03 + star.fall) * dt;
+    star.angle += (INFALL_SPIN / (rr * rr)) * dt;
     if (star.radius < 1.25) {
       spawnInfall(star, false);
       continue;
@@ -663,11 +670,16 @@ function lightCells(t, dt) {
     const flatten = 1 - 0.75 * clamp((6 - rr) / 5, 0, 1);
     const fadeIn = Math.min(1, star.age / 3);
     const lum = star.brightness * fadeIn * (0.7 + 0.3 * clamp((4 - rr) / 3, 0, 1));
-    const tail = rr < 3.2 ? 3 : 1;
+    // The streak traces where the star was over the last fraction of a second,
+    // so it lengthens as the star speeds up.
+    const speed = 0.03 + star.fall;
+    const tail = Math.min(6, 1 + Math.floor(speed * 2));
     for (let k = 0; k < tail; k++) {
-      const angle = star.angle - k * 0.08;
-      const px = Math.cos(angle) * star.radius;
-      const py = Math.sin(angle) * star.radius * flatten;
+      const back = k * 0.035;
+      const radius = star.radius + speed * back;
+      const angle = star.angle - (INFALL_SPIN / (radius * radius)) * back;
+      const px = Math.cos(angle) * radius;
+      const py = Math.sin(angle) * radius * flatten;
       const x = hole.x + (px * Math.cos(DISK_TILT) - py * Math.sin(DISK_TILT)) * hole.r;
       const y = hole.y + (px * Math.sin(DISK_TILT) + py * Math.cos(DISK_TILT)) * hole.r;
       const c = Math.floor(((x + MARGIN) * pixelRatio) / cellPxW);
@@ -675,7 +687,7 @@ function lightCells(t, dt) {
       if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
       const i = r * cols + c;
       if (holeKind[i] === 1 && (y - hole.y) ** 2 + (x - hole.x) ** 2 < hole.r * hole.r) continue;
-      skyLevels[i] = brighten(skyLevels[i], (lum * (1 - k * 0.3) * calm[i] * top) | 0);
+      skyLevels[i] = brighten(skyLevels[i], (lum * (1 - k / (tail + 1)) * calm[i] * top) | 0);
     }
   }
 
