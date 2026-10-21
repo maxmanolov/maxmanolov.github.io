@@ -71,14 +71,27 @@ const calmTargets = [".intro h1", ".intro p", ".contributions", ".socials"].map(
 const RAMP = " .,:;-=+*x%#@";
 const LEVELS = 64;
 // Brightness → colour, from deep space red through orange to white-hot.
-const PALETTE = [
-  [0, 8, 2, 1],
-  [0.2, 74, 20, 7],
-  [0.45, 176, 64, 22],
-  [0.7, 242, 134, 62],
-  [0.88, 255, 204, 146],
-  [1, 255, 246, 228],
+// Each palette maps brightness to colour. A cell stores its palette in the
+// top two bits of its byte and its brightness level in the low six.
+const SKY_PALETTE = 0;
+const WATER_PALETTE = 1;
+const LAND_PALETTE = 2;
+const HOLE_PALETTE = 3;
+const PALETTES = [
+  // Sky and star: deep space red through orange to white-hot.
+  [[0, 8, 2, 1], [0.2, 74, 20, 7], [0.45, 176, 64, 22], [0.7, 242, 134, 62], [0.88, 255, 204, 146], [1, 255, 246, 228]],
+  // Ocean: deep blue through cyan to white surf.
+  [[0, 2, 6, 18], [0.25, 8, 34, 96], [0.5, 22, 92, 186], [0.72, 54, 168, 230], [0.88, 150, 218, 248], [1, 238, 250, 255]],
+  // Land: dark forest through bright green to pale highlands.
+  [[0, 3, 10, 4], [0.25, 16, 62, 22], [0.5, 46, 132, 48], [0.72, 110, 190, 72], [0.88, 196, 222, 128], [1, 246, 250, 226]],
+  // Black hole: deep purple through violet and lavender to white.
+  [[0, 6, 2, 14], [0.25, 46, 14, 92], [0.5, 112, 50, 196], [0.72, 176, 122, 244], [0.88, 222, 196, 255], [1, 255, 252, 255]],
 ];
+const PALETTE_SHIFT = 6;
+const LEVEL_MASK = 63;
+// The share of the surface that is ocean, roughly Earth's.
+const OCEAN_SHARE = 0.62;
+let seaLevel = 0.5;
 const MARGIN = 18;
 const RAY_COUNT = 12;
 const SKY = 1;
@@ -417,7 +430,7 @@ function calmAt(x, y, rects) {
 // One pre-tinted glyph per brightness level, so each cell is a single blit.
 function buildGlyphSheet() {
   glyphSheet.width = cellPxW * LEVELS;
-  glyphSheet.height = cellPxH;
+  glyphSheet.height = cellPxH * PALETTES.length;
   const g = glyphSheet.getContext("2d");
   g.font = `500 ${Math.round(cellPxH * 0.92)}px "Geist Mono", ui-monospace, monospace`;
   g.textAlign = "center";
@@ -426,13 +439,15 @@ function buildGlyphSheet() {
     const lum = level / (LEVELS - 1);
     const glyph = RAMP[Math.round(Math.pow(lum, 0.8) * (RAMP.length - 1))];
     if (glyph === " ") continue;
-    let k = 1;
-    while (k < PALETTE.length - 1 && lum > PALETTE[k][0]) k++;
-    const [t0, r0, g0, b0] = PALETTE[k - 1];
-    const [t1, r1, g1, b1] = PALETTE[k];
-    const f = clamp((lum - t0) / (t1 - t0), 0, 1);
-    g.fillStyle = `rgb(${Math.round(r0 + (r1 - r0) * f)}, ${Math.round(g0 + (g1 - g0) * f)}, ${Math.round(b0 + (b1 - b0) * f)})`;
-    g.fillText(glyph, (level + 0.5) * cellPxW, cellPxH / 2 + 0.5);
+    PALETTES.forEach((palette, row) => {
+      let k = 1;
+      while (k < palette.length - 1 && lum > palette[k][0]) k++;
+      const [t0, r0, g0, b0] = palette[k - 1];
+      const [t1, r1, g1, b1] = palette[k];
+      const f = clamp((lum - t0) / (t1 - t0), 0, 1);
+      g.fillStyle = `rgb(${Math.round(r0 + (r1 - r0) * f)}, ${Math.round(g0 + (g1 - g0) * f)}, ${Math.round(b0 + (b1 - b0) * f)})`;
+      g.fillText(glyph, (level + 0.5) * cellPxW, (row + 0.5) * cellPxH + 0.5);
+    });
   }
 }
 
@@ -510,10 +525,19 @@ function buildScene() {
     }
   }
 
+  // Sea level sits at the terrain height that floods OCEAN_SHARE of the planet.
+  const heights = Float32Array.from(terrainStrip).sort();
+  seaLevel = heights[Math.floor(heights.length * OCEAN_SHARE)] || 0.5;
+
   skyLevels = new Uint8Array(cells);
   groundLevels = new Uint8Array(cells);
   if (gpu) uploadGlyphSheet();
   else drawStaticFrame();
+}
+
+// Raises a cell's brightness level, keeping its palette.
+function brighten(value, level) {
+  return (value & ~LEVEL_MASK) | Math.max(value & LEVEL_MASK, Math.min(level, LEVEL_MASK));
 }
 
 // Light from one star cell (0 when there is no star), twinkling on its own clock.
@@ -584,7 +608,8 @@ function lightCells(t, dt) {
           lum = Math.max(lum, far, near);
         }
       }
-      skyLevel = (Math.min(1, lum * calm[i]) * top + 0.5) | 0;
+      skyLevel = ((Math.min(1, lum * calm[i]) * top + 0.5) | 0)
+        | ((holeKind[i] ? HOLE_PALETTE : SKY_PALETTE) << PALETTE_SHIFT);
     }
     skyLevels[i] = skyLevel;
 
@@ -592,7 +617,9 @@ function lightCells(t, dt) {
     if (kind[i] & GROUND) {
       const facing = (normalX[i] * lightX + normalY[i] * lightY + normalZ[i] * lightZ) / lightNorm;
       let lum;
+      let palette = WATER_PALETTE;
       if (falloff[i] === 0) {
+        // The atmosphere glows blue.
         lum = rimGlow[i] * (0.25 + 0.75 * Math.max(0, normalX[i] * lightX + normalY[i] * lightY));
       } else {
         const lit = facing > 0 ? Math.pow(facing, 1.1) : 0;
@@ -604,11 +631,20 @@ function lightCells(t, dt) {
         const left = ((column % stripWidth) + stripWidth) % stripWidth;
         const right = (left + 1) % stripWidth;
         const terrain = terrainStrip[base + left] * (1 - blend) + terrainStrip[base + right] * blend;
-        // Slow glints drift over the high ground.
-        const sparkle = terrain > 1 ? 0.12 * Math.max(0, Math.sin(glint + cellX[i] * 0.05 + cellY[i] * 0.03)) : 0;
-        lum = 0.04 + 1.05 * lit * falloff[i] * (terrain + sparkle) + rimGlow[i] * (0.3 + 0.7 * Math.max(0, facing));
+        let surface;
+        if (terrain < seaLevel) {
+          // Ocean: an even blue, lighter in the shallows, with slow glints.
+          const glimmer = 0.1 * Math.max(0, Math.sin(glint * 2 + cellX[i] * 0.09 - cellY[i] * 0.05));
+          surface = 0.62 + 0.3 * (terrain / seaLevel) + glimmer;
+        } else {
+          // Land: brighter the higher it climbs, with glints on the peaks.
+          palette = LAND_PALETTE;
+          const sparkle = terrain > 1 ? 0.12 * Math.max(0, Math.sin(glint + cellX[i] * 0.05 + cellY[i] * 0.03)) : 0;
+          surface = 0.5 + 0.8 * (terrain - seaLevel) + sparkle;
+        }
+        lum = 0.04 + 1.05 * lit * falloff[i] * surface + rimGlow[i] * (0.3 + 0.7 * Math.max(0, facing));
       }
-      groundLevel = (Math.min(1, lum * calm[i]) * top + 0.5) | 0;
+      groundLevel = ((Math.min(1, lum * calm[i]) * top + 0.5) | 0) | (palette << PALETTE_SHIFT);
     }
     groundLevels[i] = groundLevel;
   }
@@ -639,7 +675,7 @@ function lightCells(t, dt) {
       if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
       const i = r * cols + c;
       if (holeKind[i] === 1 && (y - hole.y) ** 2 + (x - hole.x) ** 2 < hole.r * hole.r) continue;
-      skyLevels[i] = Math.max(skyLevels[i], (lum * (1 - k * 0.3) * calm[i] * top) | 0);
+      skyLevels[i] = brighten(skyLevels[i], (lum * (1 - k * 0.3) * calm[i] * top) | 0);
     }
   }
 
@@ -661,7 +697,7 @@ function lightCells(t, dt) {
       const r = Math.floor((y * pixelRatio) / cellPxH);
       if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
       const i = r * cols + c;
-      skyLevels[i] = Math.max(skyLevels[i], (fade * top) | 0);
+      skyLevels[i] = brighten(skyLevels[i], (fade * top) | 0);
     }
   }
 }
@@ -685,13 +721,16 @@ uniform vec3 planet;
 uniform vec3 sun;
 uniform float height;
 uniform float levels;
+uniform float palettes;
 
 vec4 glyphAt(vec2 p, vec2 origin, sampler2D cells, out float level) {
   vec2 g = (p - origin) / cell;
   vec2 index = floor(g);
-  level = floor(texture2D(cells, (index + 0.5) / grid).r * 255.0 + 0.5);
+  float value = floor(texture2D(cells, (index + 0.5) / grid).r * 255.0 + 0.5);
+  float palette = floor(value / 64.0);
+  level = value - palette * 64.0;
   vec2 local = g - index;
-  return texture2D(glyphs, vec2((level + local.x) / levels, local.y));
+  return texture2D(glyphs, vec2((level + local.x) / levels, (palette + local.y) / palettes));
 }
 
 void main() {
@@ -747,7 +786,7 @@ function setupGpu() {
     gl.vertexAttribPointer(corner, 2, gl.FLOAT, false, 0, 0);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     const uniforms = {};
-    for (const name of ["skyCells", "groundCells", "glyphs", "grid", "cell", "skyOrigin", "groundOrigin", "planet", "sun", "height", "levels"]) {
+    for (const name of ["skyCells", "groundCells", "glyphs", "grid", "cell", "skyOrigin", "groundOrigin", "planet", "sun", "height", "levels", "palettes"]) {
       uniforms[name] = gl.getUniformLocation(program, name);
     }
     const textures = { sky: makeTexture(), ground: makeTexture(), glyphs: makeTexture() };
@@ -805,6 +844,7 @@ function drawFrame(now) {
   gl.uniform3f(u.sun, (sun.x + skyX) * ratio, (sun.y + skyY) * ratio, sun.r * ratio);
   gl.uniform1f(u.height, space.height);
   gl.uniform1f(u.levels, LEVELS);
+  gl.uniform1f(u.palettes, PALETTES.length);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
@@ -817,9 +857,10 @@ function drawStaticFrame() {
   g.fillRect(0, 0, space.width, space.height);
   const ox = -MARGIN * pixelRatio;
   for (let i = 0; i < cols * rows; i++) {
-    const level = Math.max(skyLevels[i], groundLevels[i]);
+    const value = (groundLevels[i] & LEVEL_MASK) > (skyLevels[i] & LEVEL_MASK) ? groundLevels[i] : skyLevels[i];
+    const level = value & LEVEL_MASK;
     if (level < 2) continue;
-    g.drawImage(glyphSheet, level * cellPxW, 0, cellPxW, cellPxH,
+    g.drawImage(glyphSheet, level * cellPxW, (value >> PALETTE_SHIFT) * cellPxH, cellPxW, cellPxH,
       ox + (i % cols) * cellPxW, ox + ((i / cols) | 0) * cellPxH, cellPxW, cellPxH);
   }
 }
