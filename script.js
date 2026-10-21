@@ -101,7 +101,14 @@ let groundLevels = new Uint8Array(0);
 let gpu = null;
 let renderTimer = 0;
 let lastFrame = 0;
-const parallax = { x: 0, y: 0, targetX: 0, targetY: 0 };
+// Parallax offsets for the sky and planet layers (kept at rest; the camera's
+// motion is carried by the travelling starfield and the turning planet).
+const parallax = { x: 0, y: 0 };
+// The camera glides in one direction with inertia: it eases up from rest, then
+// cruises at a speed that slowly swells and settles. travel is in cells.
+const camera = { speed: 0, travel: 0, spin: 0 };
+const CRUISE = 7;
+const NEAR_LAYER = 2.4;
 const meteors = [];
 // Stars slowly drawn into the black hole, spiralling in and stretching out.
 const infall = Array.from({ length: 34 }, () => spawnInfall({}, true));
@@ -126,11 +133,18 @@ let holeAngle = new Float32Array(0);
 let holeRadius = new Float32Array(0);
 let rayId = new Int8Array(0);
 let rayLight = new Float32Array(0);
-let twinkle = new Float32Array(0);
+// Each sky cell's starlight source, offset by lensing near the black hole.
+let starShift = new Int16Array(0);
+let starRow = new Int16Array(0);
 let normalX = new Float32Array(0);
 let normalY = new Float32Array(0);
 let normalZ = new Float32Array(0);
-let terrain = new Float32Array(0);
+// Planet surface: each cell's column into a terrain strip that wraps once
+// around the planet, so the surface can turn under the camera.
+let groundColumn = new Float32Array(0);
+let groundRow = new Uint16Array(0);
+let terrainStrip = new Float32Array(0);
+let stripWidth = 1;
 let falloff = new Float32Array(0);
 let rimGlow = new Float32Array(0);
 let cellX = new Float32Array(0);
@@ -147,28 +161,39 @@ function hash(a, b, c) {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
-function noise(x, y, seed) {
+// Value noise that repeats every `period` units in x, so terrain wraps seamlessly.
+function wrappedNoise(x, y, seed, period) {
   const xi = Math.floor(x);
   const yi = Math.floor(y);
+  const x0 = ((xi % period) + period) % period;
+  const x1 = (x0 + 1) % period;
   const u = (x - xi) * (x - xi) * (3 - 2 * (x - xi));
   const v = (y - yi) * (y - yi) * (3 - 2 * (y - yi));
-  const a = hash(xi, yi, seed);
-  const b = hash(xi + 1, yi, seed);
-  const c = hash(xi, yi + 1, seed);
-  const d = hash(xi + 1, yi + 1, seed);
+  const a = hash(x0, yi, seed);
+  const b = hash(x1, yi, seed);
+  const c = hash(x0, yi + 1, seed);
+  const d = hash(x1, yi + 1, seed);
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
 
-function fbm(x, y, seed) {
+function wrappedFbm(x, y, seed, period) {
   let sum = 0;
   let amplitude = 0.5;
   for (let octave = 0; octave < 5; octave++) {
-    sum += amplitude * noise(x, y, seed + octave);
-    x *= 2.03;
+    sum += amplitude * wrappedNoise(x, y, seed + octave, period);
+    x *= 2;
     y *= 2.03;
+    period *= 2;
     amplitude *= 0.5;
   }
   return sum / 0.97;
+}
+
+function terrainAt(u, v, period) {
+  const ground = wrappedFbm(u, v, 3, period);
+  const ridges = 1 - Math.abs(wrappedFbm(u * 2 + 4, v * 1.7, 11, period * 2) * 2 - 1);
+  const craters = Math.max(0, 0.62 - wrappedNoise(u * 0.5, v * 0.55, 23, period / 2)) * 1.6;
+  return clamp(0.2 + 0.9 * ground + 0.4 * ridges * ridges - 0.6 * craters, 0, 1.3);
 }
 
 function circleThrough(ax, ay, bx, by, cx, cy) {
@@ -292,10 +317,11 @@ function describeHole(i, x, y) {
 
 // Static sky light for one cell; the strongest ray is stored separately so it can pulse.
 function describeSky(i, x, y, c, r) {
+  starShift[i] = 0;
+  starRow[i] = -1;
   if (describeHole(i, x, y)) {
     rayId[i] = -1;
     rayLight[i] = 0;
-    twinkle[i] = 0;
     return;
   }
   const dx = x - sun.x;
@@ -344,12 +370,9 @@ function describeSky(i, x, y, c, r) {
     starR = Math.floor(((sy + MARGIN) * pixelRatio) / cellPxH);
     lum += 0.08 * Math.exp(-(hd / hole.r - SHADOW) / 1.6);
   }
-  const star = hash(starC, starR, 17);
-  twinkle[i] = 0;
-  if (star > 0.9965) {
-    lum = Math.max(lum, 0.35 + (star - 0.9965) * 170);
-    twinkle[i] = 1 + hash(starC, starR, 29) * 6;
-  }
+  // Stars themselves are drawn per frame, so they can stream past.
+  starShift[i] = starC - c;
+  starRow[i] = starR;
   skyBase[i] = Math.min(lum, 1);
 }
 
@@ -365,7 +388,6 @@ function describeGround(i, x, y) {
     normalZ[i] = 0;
     falloff[i] = 0;
     rimGlow[i] = Math.exp(-(dist - planet.r) / 7) * 0.75;
-    terrain[i] = 0;
     return;
   }
   const nx = dx / planet.r;
@@ -374,13 +396,10 @@ function describeGround(i, x, y) {
   normalY[i] = ny;
   normalZ[i] = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
   const depth = planet.r - dist;
-  const along = Math.atan2(dy, dx) * planet.r;
-  const u = along / 46;
-  const v = Math.pow(depth, 0.8) / 16;
-  const ground = fbm(u, v, 3);
-  const ridges = 1 - Math.abs(fbm(u * 1.7 + 4, v * 1.7, 11) * 2 - 1);
-  const craters = Math.max(0, 0.62 - noise(u * 0.55, v * 0.55, 23)) * 1.6;
-  terrain[i] = clamp(0.2 + 0.9 * ground + 0.4 * ridges * ridges - 0.6 * craters, 0, 1.3);
+  // u runs once around the planet (wrapping), v inward from the limb.
+  const turn = (Math.atan2(dy, dx) / (Math.PI * 2) + 1) % 1;
+  groundColumn[i] = turn * stripWidth;
+  groundRow[i] = Math.round((Math.pow(depth, 0.8) / 16) * 8);
   falloff[i] = 0.3 + 0.7 * Math.exp(-depth / (planet.r * 0.38));
   rimGlow[i] = Math.exp(-depth / 5) * 0.6;
 }
@@ -443,11 +462,16 @@ function buildScene() {
   holeRadius = new Float32Array(cells);
   rayId = new Int8Array(cells);
   rayLight = new Float32Array(cells);
-  twinkle = new Float32Array(cells);
+  starShift = new Int16Array(cells);
+  starRow = new Int16Array(cells);
   normalX = new Float32Array(cells);
   normalY = new Float32Array(cells);
   normalZ = new Float32Array(cells);
-  terrain = new Float32Array(cells);
+  groundColumn = new Float32Array(cells);
+  groundRow = new Uint16Array(cells);
+  // Terrain period: about one noise cell per 46 px of circumference, rounded to a multiple of 4.
+  const period = Math.max(8, 4 * Math.round((Math.PI * 2 * planet.r) / 46 / 4));
+  stripWidth = period * 4;
   falloff = new Float32Array(cells);
   rimGlow = new Float32Array(cells);
   cellX = new Float32Array(cells);
@@ -474,10 +498,30 @@ function buildScene() {
     }
   }
 
+  // The terrain strip covers only the depths that are actually on screen.
+  let stripRows = 1;
+  for (let i = 0; i < cells; i++) {
+    if (kind[i] & GROUND && falloff[i] > 0) stripRows = Math.max(stripRows, groundRow[i] + 1);
+  }
+  terrainStrip = new Float32Array(stripWidth * stripRows);
+  for (let row = 0; row < stripRows; row++) {
+    for (let column = 0; column < stripWidth; column++) {
+      terrainStrip[row * stripWidth + column] = terrainAt(column / 4, row / 8, period);
+    }
+  }
+
   skyLevels = new Uint8Array(cells);
   groundLevels = new Uint8Array(cells);
   if (gpu) uploadGlyphSheet();
   else drawStaticFrame();
+}
+
+// Light from one star cell (0 when there is no star), twinkling on its own clock.
+function starLight(column, row, seed, threshold, t) {
+  const h = hash(column, row, seed);
+  if (h <= threshold) return 0;
+  const brightness = 0.35 + (h - threshold) * (0.6 / (1 - threshold));
+  return brightness * (0.6 + 0.4 * Math.sin(t * 1.7 + h * 9973));
 }
 
 // Re-lights every cell for time t into skyLevels / groundLevels (one byte each).
@@ -500,6 +544,15 @@ function lightCells(t, dt) {
   const lightNorm = Math.hypot(lightX, lightY, lightZ);
   const glint = t * 0.6;
   const top = LEVELS - 1;
+  // The starfield streams past in two depth layers, the near one faster;
+  // each star glides between cells by splitting its light across two of them.
+  const farTravel = camera.travel;
+  const nearTravel = camera.travel * NEAR_LAYER;
+  const farStep = Math.floor(farTravel);
+  const nearStep = Math.floor(nearTravel);
+  const farBlend = farTravel - farStep;
+  const nearBlend = nearTravel - nearStep;
+  const spinColumns = camera.spin * 4;
   const cells = cols * rows;
 
   for (let i = 0; i < cells; i++) {
@@ -521,7 +574,15 @@ function lightCells(t, dt) {
       } else {
         const ray = rayId[i];
         if (ray >= 0) lum += rayLight[i] * rayPulse[ray];
-        if (twinkle[i]) lum *= 0.55 + 0.45 * Math.sin(t * 1.7 + twinkle[i]);
+        const row = starRow[i];
+        if (row >= 0) {
+          const column = (i % cols) + starShift[i];
+          const far = starLight(column + farStep, row, 17, 0.9965, t) * (1 - farBlend)
+            + starLight(column + farStep + 1, row, 17, 0.9965, t) * farBlend;
+          const near = starLight(column + nearStep, row, 41, 0.9989, t) * (1 - nearBlend)
+            + starLight(column + nearStep + 1, row, 41, 0.9989, t) * nearBlend;
+          lum = Math.max(lum, far, near);
+        }
       }
       skyLevel = (Math.min(1, lum * calm[i]) * top + 0.5) | 0;
     }
@@ -535,9 +596,17 @@ function lightCells(t, dt) {
         lum = rimGlow[i] * (0.25 + 0.75 * Math.max(0, normalX[i] * lightX + normalY[i] * lightY));
       } else {
         const lit = facing > 0 ? Math.pow(facing, 1.1) : 0;
+        // The surface turns under the camera: read the strip at a moving column.
+        const position = groundColumn[i] + spinColumns;
+        const column = Math.floor(position);
+        const blend = position - column;
+        const base = groundRow[i] * stripWidth;
+        const left = ((column % stripWidth) + stripWidth) % stripWidth;
+        const right = (left + 1) % stripWidth;
+        const terrain = terrainStrip[base + left] * (1 - blend) + terrainStrip[base + right] * blend;
         // Slow glints drift over the high ground.
-        const sparkle = terrain[i] > 1 ? 0.12 * Math.max(0, Math.sin(glint + cellX[i] * 0.05 + cellY[i] * 0.03)) : 0;
-        lum = 0.04 + 1.05 * lit * falloff[i] * (terrain[i] + sparkle) + rimGlow[i] * (0.3 + 0.7 * Math.max(0, facing));
+        const sparkle = terrain > 1 ? 0.12 * Math.max(0, Math.sin(glint + cellX[i] * 0.05 + cellY[i] * 0.03)) : 0;
+        lum = 0.04 + 1.05 * lit * falloff[i] * (terrain + sparkle) + rimGlow[i] * (0.3 + 0.7 * Math.max(0, facing));
       }
       groundLevel = (Math.min(1, lum * calm[i]) * top + 0.5) | 0;
     }
@@ -706,9 +775,15 @@ function drawFrame(now) {
   requestAnimationFrame(drawFrame);
   const dt = lastFrame ? Math.min(0.1, (now - lastFrame) / 1000) : 0;
   lastFrame = now;
-  parallax.x += (parallax.targetX - parallax.x) * Math.min(1, dt * 5);
-  parallax.y += (parallax.targetY - parallax.y) * Math.min(1, dt * 5);
-  lightCells(now / 1000, dt);
+  // Inertia: the camera eases toward a cruising speed that slowly swells and
+  // settles, and never reverses.
+  const seconds = now / 1000;
+  const cruise = CRUISE * (1 + 0.25 * Math.sin(seconds * 0.13) + 0.1 * Math.sin(seconds * 0.051 + 1.7));
+  camera.speed += (cruise - camera.speed) * (1 - Math.exp(-dt / 2.5));
+  camera.travel += camera.speed * dt;
+  // The planet turns slowly under the camera, in step with its speed.
+  camera.spin += camera.speed * dt * 0.035;
+  lightCells(seconds, dt);
 
   const ratio = pixelRatio;
   const skyX = -parallax.x * 4;
@@ -754,26 +829,12 @@ function scheduleBuild() {
   renderTimer = setTimeout(buildScene, 150);
 }
 
-function aim(x, y) {
-  parallax.targetX = clamp((x / viewWidth - 0.5) * 2, -1, 1);
-  parallax.targetY = clamp((y / viewHeight - 0.5) * 2, -1, 1);
-}
-
-window.addEventListener("pointermove", (event) => aim(event.clientX, event.clientY), { passive: true });
 window.addEventListener("pointerdown", (event) => {
-  aim(event.clientX, event.clientY);
   // A shooting star streaks away from the click, down toward the planet.
   const speed = Math.max(viewWidth, viewHeight) * 0.65;
   const angle = Math.PI * 0.82 + (Math.random() - 0.5) * 0.4;
   meteors.push({ x: event.clientX, y: event.clientY, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, age: 0 });
 }, { passive: true });
-window.addEventListener("touchmove", (event) => {
-  const touch = event.touches[0];
-  if (touch) aim(touch.clientX, touch.clientY);
-}, { passive: true });
-document.addEventListener("pointerout", (event) => {
-  if (!event.relatedTarget) aim(viewWidth / 2, viewHeight / 2);
-});
 window.addEventListener("resize", scheduleBuild);
 document.fonts?.ready.then(buildScene);
 
