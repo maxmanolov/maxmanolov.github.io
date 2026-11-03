@@ -123,6 +123,9 @@ const camera = { speed: 0, travel: 0, spin: 0 };
 const CRUISE = 7;
 const NEAR_LAYER = 2.4;
 const meteors = [];
+// A swallowed meteor takes this long to spiral in, winding this many extra turns.
+const SPIRAL_TIME = 1.8;
+const SPIRAL_TURNS = 1.5;
 // Infall strength (in horizon radii and seconds) and the spin stars pick up.
 const INFALL_PULL = 5;
 const INFALL_SPIN = 10;
@@ -539,6 +542,56 @@ function buildScene() {
   else drawStaticFrame();
 }
 
+// Where a meteor is `age` seconds after launch, and how big it still is (1 → 0).
+// Before capture it flies straight; after, it circles the black hole on a
+// tightening spiral, whirling faster as it falls, and shrinks into the centre.
+const meteorPoint = { x: 0, y: 0, size: 1 };
+function meteorAt(meteor, age) {
+  if (meteor.capturedAt < 0 || age <= meteor.capturedAt) {
+    meteorPoint.x = meteor.x + meteor.vx * age;
+    meteorPoint.y = meteor.y + meteor.vy * age;
+    meteorPoint.size = 1;
+    return meteorPoint;
+  }
+  const progress = Math.min(1, (age - meteor.capturedAt) / SPIRAL_TIME);
+  const radius = meteor.captureRadius * Math.pow(1 - progress, 1.4);
+  const angle = meteor.captureAngle
+    + meteor.spin * (meteor.entrySpin * (age - meteor.capturedAt) + SPIRAL_TURNS * Math.PI * 2 * progress * progress * progress);
+  meteorPoint.x = hole.x + Math.cos(angle) * radius;
+  meteorPoint.y = hole.y + Math.sin(angle) * radius;
+  meteorPoint.size = 1 - progress;
+  return meteorPoint;
+}
+
+// Works out whether a meteor's straight path enters the black hole's shadow
+// during its flight, and if so when, where and which way it will circle.
+function captureMeteor(meteor) {
+  meteor.capturedAt = -1;
+  const radius = hole.r * SHADOW;
+  const ox = meteor.x - hole.x;
+  const oy = meteor.y - hole.y;
+  const a = meteor.vx * meteor.vx + meteor.vy * meteor.vy;
+  const b = 2 * (ox * meteor.vx + oy * meteor.vy);
+  const c = ox * ox + oy * oy - radius * radius;
+  let entry;
+  if (c <= 0) entry = 0;
+  else {
+    const disc = b * b - 4 * a * c;
+    if (disc < 0) return;
+    entry = (-b - Math.sqrt(disc)) / (2 * a);
+    if (entry < 0 || entry > 1.2) return;
+  }
+  const ex = ox + meteor.vx * entry;
+  const ey = oy + meteor.vy * entry;
+  meteor.capturedAt = entry;
+  meteor.captureRadius = Math.max(hole.r * 0.5, Math.hypot(ex, ey));
+  meteor.captureAngle = Math.atan2(ey, ex);
+  // Circle the same way the meteor was already moving around the hole.
+  const cross = ex * meteor.vy - ey * meteor.vx;
+  meteor.spin = cross >= 0 ? 1 : -1;
+  meteor.entrySpin = Math.min(6, Math.abs(cross) / (meteor.captureRadius * meteor.captureRadius));
+}
+
 // Raises a cell's brightness level, keeping its palette.
 function brighten(value, level) {
   return (value & ~LEVEL_MASK) | Math.max(value & LEVEL_MASK, Math.min(level, LEVEL_MASK));
@@ -692,19 +745,25 @@ function lightCells(t, dt) {
   }
 
   // Meteors launched by clicks: a bright head and a fading tail of cells.
+  // One captured by the black hole spirals in and shrinks to nothing.
   for (let k = meteors.length - 1; k >= 0; k--) {
     const meteor = meteors[k];
     meteor.age += dt;
-    if (meteor.age > 1.2) {
+    const life = meteor.capturedAt >= 0 ? meteor.capturedAt + SPIRAL_TIME : 1.2;
+    if (meteor.age > life) {
       meteors.splice(k, 1);
       continue;
     }
+    // Swallowed meteors keep their brightness until they shrink away.
+    const remaining = meteor.capturedAt >= 0 ? 1 : 1 - meteor.age / 1.2;
     for (let s = 0; s < 60; s++) {
       const age = meteor.age - s * 0.004;
       if (age < 0) break;
-      const fade = (1 - s / 60) * (1 - meteor.age / 1.2);
-      const x = meteor.x + meteor.vx * age + parallax.x * 4 + MARGIN;
-      const y = meteor.y + meteor.vy * age + parallax.y * 3 + MARGIN;
+      const point = meteorAt(meteor, age);
+      const fade = (1 - s / 60) * remaining * point.size;
+      if (fade <= 0.02) continue;
+      const x = point.x + parallax.x * 4 + MARGIN;
+      const y = point.y + parallax.y * 3 + MARGIN;
       const c = Math.floor((x * pixelRatio) / cellPxW);
       const r = Math.floor((y * pixelRatio) / cellPxH);
       if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
@@ -886,7 +945,9 @@ window.addEventListener("pointerdown", (event) => {
   // A shooting star streaks away from the click, down toward the planet.
   const speed = Math.max(viewWidth, viewHeight) * 0.65;
   const angle = Math.PI * 0.82 + (Math.random() - 0.5) * 0.4;
-  meteors.push({ x: event.clientX, y: event.clientY, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, age: 0 });
+  const meteor = { x: event.clientX, y: event.clientY, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, age: 0 };
+  captureMeteor(meteor);
+  meteors.push(meteor);
 }, { passive: true });
 window.addEventListener("resize", scheduleBuild);
 document.fonts?.ready.then(buildScene);
