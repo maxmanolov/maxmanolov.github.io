@@ -262,12 +262,12 @@ function composeScene() {
   const H = viewHeight;
   if (W >= H * 1.1) {
     sun = { x: W * 0.74, y: H * 0.27, r: Math.min(W, H) * 0.045 };
-    hole = { x: W * 0.16, y: H * 0.17, r: Math.min(W, H) * 0.034 };
+    hole = { x: W * 0.16, y: H * 0.17, r: Math.min(W, H) * 0.016 };
     moon = { x: W * 0.85, y: H * 0.72, r: Math.min(W, H) * 0.068 };
     planet = circleThrough(-W * 0.02, H * 0.44, W * 0.27, H * 0.64, W * 0.56, H * 1.06);
   } else {
     sun = { x: W * 0.72, y: H * 0.075, r: W * 0.055 };
-    hole = { x: W * 0.22, y: H * 0.085, r: W * 0.052 };
+    hole = { x: W * 0.22, y: H * 0.085, r: W * 0.026 };
     moon = { x: W * 0.47, y: H * 0.19, r: W * 0.075 };
     planet = circleThrough(-W * 0.05, H * 0.72, W * 0.45, H * 0.8, W * 1.05, H * 1.02);
   }
@@ -335,7 +335,8 @@ function describeHole(i, x, y) {
     skyBase[i] = 0;
     return true;
   }
-  if (Math.abs(d - 1.06) < 0.05) {
+  // At small sizes the ring stays at least one cell wide.
+  if (Math.abs(d - 1.06) < Math.max(0.05, (cellW * 0.6) / hole.r)) {
     // The photon ring: a fine bright line, not an outline.
     holeKind[i] = 3;
     holeAngle[i] = Math.atan2(dy, dx);
