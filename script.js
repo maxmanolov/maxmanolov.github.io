@@ -113,6 +113,7 @@ let cellPxH = 12;
 let cols = 0;
 let rows = 0;
 let sun = { x: 0, y: 0, r: 1 };
+let moon = { x: 0, y: 0, r: 1 };
 let hole = { x: 0, y: 0, r: 1 };
 let planet = { x: 0, y: 0, r: 1 };
 let skyLevels = new Uint8Array(0);
@@ -132,6 +133,17 @@ const meteors = [];
 // A swallowed meteor takes this long to spiral in, winding this many extra turns.
 const SPIRAL_TIME = 1.8;
 const SPIRAL_TURNS = 1.5;
+// The star's planets: tiny worlds on tilted orbits (sizes and orbits in star
+// radii), revolving very slowly, with periods set by Kepler's third law.
+const ORBIT_SQUASH = 0.3;
+const ORBIT_TILT = -0.12;
+const PLANETS = [
+  { orbit: 2, size: 0.1, palette: SKY_PALETTE, lum: 0.75, phase: 0.8 },
+  { orbit: 2.8, size: 0.14, palette: SKY_PALETTE, lum: 1, phase: 2.6 },
+  { orbit: 3.6, size: 0.14, palette: WATER_PALETTE, lum: 0.95, phase: 4.1 },
+  { orbit: 4.4, size: 0.11, palette: SKY_PALETTE, lum: 0.68, phase: 5.5 },
+  { orbit: 5.4, size: 0.28, palette: SKY_PALETTE, lum: 0.9, phase: 1.7, banded: true },
+].map((world) => ({ ...world, period: 18 * Math.pow(world.orbit, 1.5) }));
 // Earthquakes from clicks on the planet: a fast faint P wave and a slower,
 // stronger S wave ring out from the epicentre while the planet shakes.
 const quakes = [];
@@ -166,6 +178,8 @@ let skyBase = new Float32Array(0);
 let holeKind = new Uint8Array(0);
 let holeAngle = new Float32Array(0);
 let holeRadius = new Float32Array(0);
+// Cells drawn in the moon's grey: 1 the moon itself, 2 a dotted planet orbit.
+let moonCell = new Uint8Array(0);
 let rayId = new Int8Array(0);
 let rayLight = new Float32Array(0);
 // Each sky cell's starlight source, offset by lensing near the black hole.
@@ -249,10 +263,12 @@ function composeScene() {
   if (W >= H * 1.1) {
     sun = { x: W * 0.74, y: H * 0.27, r: Math.min(W, H) * 0.045 };
     hole = { x: W * 0.16, y: H * 0.17, r: Math.min(W, H) * 0.034 };
+    moon = { x: W * 0.85, y: H * 0.72, r: Math.min(W, H) * 0.068 };
     planet = circleThrough(-W * 0.02, H * 0.44, W * 0.27, H * 0.64, W * 0.56, H * 1.06);
   } else {
     sun = { x: W * 0.72, y: H * 0.075, r: W * 0.055 };
     hole = { x: W * 0.22, y: H * 0.085, r: W * 0.052 };
+    moon = { x: W * 0.47, y: H * 0.19, r: W * 0.075 };
     planet = circleThrough(-W * 0.05, H * 0.72, W * 0.45, H * 0.8, W * 1.05, H * 1.02);
   }
 }
@@ -353,11 +369,39 @@ function describeHole(i, x, y) {
   return false;
 }
 
+// The moon: a grey, cratered sphere lit from the star's side, with a faint
+// earthshine on its night side. Returns true for cells it covers.
+function describeMoon(i, x, y) {
+  const nx = (x - moon.x) / moon.r;
+  const ny = (y - moon.y) / moon.r;
+  const d2 = nx * nx + ny * ny;
+  if (d2 > 1) return false;
+  const nz = Math.sqrt(1 - d2);
+  let lx = sun.x - moon.x;
+  let ly = sun.y - moon.y;
+  const ll = Math.hypot(lx, ly);
+  lx /= ll;
+  ly /= ll;
+  // The star sits a little toward the camera, so the moon shows a fat gibbous.
+  const lz = 1.3;
+  const lambert = Math.max(0, (nx * lx + ny * ly + nz * lz) / Math.hypot(1, lz));
+  // Dark maria and bright cratered highlands, scaled to the moon's size.
+  const u = nx * 3.2 + 7;
+  const v = ny * 3.2 + 7;
+  const maria = clamp((wrappedFbm(u * 0.6, v * 0.6, 113, 1000) - 0.5) * 3, 0, 1);
+  const craters = Math.pow(1 - Math.abs(wrappedNoise(u * 2.2, v * 2.2, 127, 1000) * 2 - 1), 6);
+  const surface = 0.82 - 0.32 * maria + 0.18 * craters;
+  moonCell[i] = 1;
+  skyBase[i] = Math.min(0.95, 0.12 + 0.88 * Math.pow(lambert, 0.9) * surface);
+  return true;
+}
+
 // Static sky light for one cell; the strongest ray is stored separately so it can pulse.
 function describeSky(i, x, y, c, r) {
   starShift[i] = 0;
   starRow[i] = -1;
-  if (describeHole(i, x, y)) {
+  moonCell[i] = 0;
+  if (describeHole(i, x, y) || describeMoon(i, x, y)) {
     rayId[i] = -1;
     rayLight[i] = 0;
     return;
@@ -384,12 +428,6 @@ function describeSky(i, x, y, c, r) {
     }
   }
   lum += Math.exp(-Math.abs(dy) / (sun.r * 0.12)) * Math.exp(-Math.abs(dx) / (viewWidth * 0.45)) * 0.45;
-  for (let k = 0; k < 5; k++) {
-    const px = sun.x + sun.r * (2.2 + k * 1.9 + hash(k, 1, 9) * 0.8);
-    const py = sun.y + sun.r * (0.55 + k * 0.33);
-    const pd = Math.hypot(x - px, y - py);
-    if (pd < cellW * 1.6) lum += 0.75 * (1 - pd / (cellW * 1.6));
-  }
   const loner = Math.hypot(x - viewWidth * 0.09, y - viewHeight * 0.33);
   if (loner < cellW * 1.6) lum += 0.7 * (1 - loner / (cellW * 1.6));
   // Starlight near the black hole is lensed: each cell shows the star that
@@ -500,6 +538,7 @@ function buildScene() {
   holeKind = new Uint8Array(cells);
   holeAngle = new Float32Array(cells);
   holeRadius = new Float32Array(cells);
+  moonCell = new Uint8Array(cells);
   rayId = new Int8Array(cells);
   rayLight = new Float32Array(cells);
   starShift = new Int16Array(cells);
@@ -535,6 +574,23 @@ function buildScene() {
         kind[i] |= SKY;
         describeSky(i, x, y, c, r);
       }
+    }
+  }
+
+  // Faint dotted orbits, so the planets read as one system.
+  for (const world of PLANETS) {
+    const radius = world.orbit * sun.r;
+    const steps = Math.ceil(radius * 2.4);
+    for (let k = 0; k < steps; k += 3) {
+      const angle = (k / steps) * Math.PI * 2;
+      const point = orbitPoint(radius, angle);
+      const c = Math.floor(((point.x + MARGIN) * pixelRatio) / cellPxW);
+      const r = Math.floor(((point.y + MARGIN) * pixelRatio) / cellPxH);
+      if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
+      const i = r * cols + c;
+      if (!(kind[i] & SKY) || holeKind[i] || moonCell[i] || skyBase[i] >= 0.2) continue;
+      moonCell[i] = 2;
+      skyBase[i] = 0.24;
     }
   }
 
@@ -643,6 +699,60 @@ function quakeLight(quake, x, y, t) {
   return (waves + flash) * fade;
 }
 
+// A point on a planet's orbit around the star, seen at a tilt.
+const orbitScratch = { x: 0, y: 0, front: true };
+function orbitPoint(radius, angle) {
+  const ox = Math.cos(angle) * radius;
+  const oy = Math.sin(angle) * radius * ORBIT_SQUASH;
+  orbitScratch.x = sun.x + ox * Math.cos(ORBIT_TILT) - oy * Math.sin(ORBIT_TILT);
+  orbitScratch.y = sun.y + ox * Math.sin(ORBIT_TILT) + oy * Math.cos(ORBIT_TILT);
+  orbitScratch.front = Math.sin(angle) > 0;
+  return orbitScratch;
+}
+
+// Draws the star's planets for time t: each a tiny disc lit from the star's
+// side, hidden behind the star on the far half of its orbit and silhouetted
+// against it on the near half.
+function drawPlanets(t, top) {
+  for (const world of PLANETS) {
+    const point = orbitPoint(world.orbit * sun.r, world.phase + (t / world.period) * Math.PI * 2);
+    const px = point.x;
+    const py = point.y;
+    const front = point.front;
+    const size = Math.max(world.size * sun.r, cellW * 0.8);
+    const c0 = Math.floor(((px - size + MARGIN) * pixelRatio) / cellPxW);
+    const c1 = Math.floor(((px + size + MARGIN) * pixelRatio) / cellPxW);
+    const r0 = Math.floor(((py - size + MARGIN) * pixelRatio) / cellPxH);
+    const r1 = Math.floor(((py + size + MARGIN) * pixelRatio) / cellPxH);
+    const centreCell = Math.floor(((py + MARGIN) * pixelRatio) / cellPxH) * cols
+      + Math.floor(((px + MARGIN) * pixelRatio) / cellPxW);
+    let toSunX = sun.x - px;
+    let toSunY = sun.y - py;
+    const toSun = Math.hypot(toSunX, toSunY) || 1;
+    toSunX /= toSun;
+    toSunY /= toSun;
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
+        const i = r * cols + c;
+        if (!(kind[i] & SKY) || holeKind[i] || moonCell[i] === 1) continue;
+        const dx = cellX[i] - px;
+        const dy = cellY[i] - py;
+        // Tiny worlds still claim the one cell they sit in.
+        if (Math.hypot(dx, dy) > size && i !== centreCell) continue;
+        if (skyBase[i] >= 1) {
+          if (front) skyLevels[i] = SKY_PALETTE << PALETTE_SHIFT;
+          continue;
+        }
+        const lit = 0.6 + 0.4 * clamp((dx * toSunX + dy * toSunY) / size, -1, 1);
+        const bands = world.banded ? 0.82 + 0.18 * Math.sin((dy / size) * 5) : 1;
+        const level = Math.min(LEVEL_MASK, (world.lum * lit * bands * calm[i] * top + 0.5) | 0);
+        if (level > (skyLevels[i] & LEVEL_MASK)) skyLevels[i] = (world.palette << PALETTE_SHIFT) | level;
+      }
+    }
+  }
+}
+
 // Raises a cell's brightness level, keeping its palette.
 function brighten(value, level) {
   const current = value & LEVEL_MASK;
@@ -724,8 +834,8 @@ function lightCells(t, dt) {
           lum = Math.max(lum, far, near);
         }
       }
-      let skyPalette = holeKind[i] ? HOLE_PALETTE : SKY_PALETTE;
-      if (!holeKind[i] && lum < 0.4) {
+      let skyPalette = holeKind[i] ? HOLE_PALETTE : moonCell[i] ? MILKY_PALETTE : SKY_PALETTE;
+      if (!holeKind[i] && !moonCell[i] && lum < 0.4) {
         const base = ((i / cols) | 0) * milkyWidth;
         const left = ((((i % cols) + milkyStep) % milkyWidth) + milkyWidth) % milkyWidth;
         const right = (left + 1) % milkyWidth;
@@ -775,6 +885,8 @@ function lightCells(t, dt) {
     }
     groundLevels[i] = groundLevel;
   }
+
+  drawPlanets(t, top);
 
   // Infalling stars accelerate: gravity grows as 1/r² and keeps adding to
   // their inward speed, and they spin faster as they fall (angular momentum),
