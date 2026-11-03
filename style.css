@@ -42,6 +42,7 @@ body {
 main {
   position: relative;
   z-index: 1;
+  transition: opacity 0.5s ease;
   display: flex;
   width: min(100%, 46rem);
   min-height: 100vh;
@@ -51,6 +52,12 @@ main {
   padding: clamp(3rem, 11vh, 6.5rem) clamp(1.25rem, 5vw, 3rem) clamp(2.5rem, 9vh, 5.5rem);
   flex-direction: column;
   align-items: center;
+}
+
+/* Out of the way while the camera is off visiting a planet or moon. */
+.visiting main {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Auto margins centre the column vertically, and fall back to top-aligned
@@ -239,10 +246,11 @@ h2 {
   text-decoration-thickness: 2px;
 }
 
-/* A flight's card, drawn in characters: a box-drawn frame around its
-   details. It pops up beside the plane, which places it from script.
-   Lines sit as tall as a full block, so the frame and big letters join up. */
-.flight {
+/* The cards for flights, planets and moons, drawn in characters: a box-drawn
+   frame around the details. Each pops up beside what it is about, placed
+   from script. Lines sit as tall as a full block, so the frame and big
+   letters join up. */
+.card {
   position: fixed;
   z-index: 2;
   top: 0;
@@ -257,49 +265,65 @@ h2 {
   font-size: 0.6875rem;
   font-weight: 500;
   line-height: 1.2;
-  animation: flight-open 0.18s ease-out;
+  animation: card-open 0.18s ease-out;
 }
 
-@keyframes flight-open {
+@keyframes card-open {
   from {
     opacity: 0;
   }
 }
 
-.flight[hidden] {
+.card[hidden] {
   display: none;
 }
 
-.flight-art {
+.card-art {
   white-space: pre;
 }
 
-.flight-art .frame {
+.card-art .frame {
   color: #46484d;
 }
 
-.flight-art .bright {
+.card-art .bright {
   color: #f6f6f2;
 }
 
-.flight-art .dim {
+.card-art .dim {
   color: #8f908b;
 }
 
-.flight-art .faint {
+.card-art .faint {
   color: #5d5f64;
 }
 
-.flight-art .gold {
+.card-art .gold {
   color: #ffc24a;
 }
 
-.flight-art .live {
+.card-art .live {
   color: #6fdc9b;
 }
 
+/* Moons to fly to, in the neon of the flight paths. */
+.card-art .link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #5ee7ff;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+.card-art .link:hover,
+.card-art .link:focus-visible {
+  color: #e6fdff;
+}
+
 /* Sits over the gap left for it in the frame's top edge. */
-.flight-close {
+.card-close {
   position: absolute;
   top: 0.5rem;
   right: calc(0.625rem + 3ch);
@@ -312,12 +336,12 @@ h2 {
   cursor: pointer;
 }
 
-.flight-close:hover,
-.flight-close:focus-visible {
+.card-close:hover,
+.card-close:focus-visible {
   color: #fff;
 }
 
-.flight-summary {
+.card-summary {
   position: absolute;
   width: 1px;
   height: 1px;

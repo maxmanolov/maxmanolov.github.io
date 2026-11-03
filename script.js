@@ -185,6 +185,9 @@ let calmMap = new Uint8Array(0);
 let milkyMap = new Uint8Array(0);
 let milkyWidth = 1;
 let gpu = null;
+// How much the scene steps back under the page text: fully, except while the
+// camera is off visiting a planet or moon and the text is hidden.
+let calmAmount = 1;
 let renderTimer = 0;
 let lastFrame = 0;
 // The camera's position; scrolling moves it.
@@ -209,18 +212,106 @@ const METEOR_STEP = 1 / 240;
 // Meteor fall strength (2G, in px³/s² on a 900 px tall screen): about 400 px/s
 // at 1,000 px from the black hole, 2,000 px/s as it reaches the shadow.
 const METEOR_PULL = 1.6e8;
-// The star's planets: tiny worlds on a tilted orbital plane (sizes and orbits
-// in star radii), revolving very slowly, with periods set by Kepler's third law.
+// The Sun's planets on a tilted orbital plane, in order, with their sizes and
+// orbits in star radii (not to scale, so they all fit) and periods set by
+// Kepler's third law. Each has its facts (distances in km, days and years
+// sunrise to sunrise and once round the Sun) and its best-known moons, whose
+// sizes and orbits are in planet radii.
 const ORBIT_SQUASH = 0.3;
 const ORBIT_DEPTH = Math.sqrt(1 - ORBIT_SQUASH * ORBIT_SQUASH);
 const ORBIT_TILT = -0.12;
+const moon = (name, orbit, size, palette, lum, look, km, across, orbitTime, note) => ({ name, orbit, size, palette, lum, look, km, across, orbitTime, note });
 const PLANETS = [
-  { orbit: 2, size: 0.1, palette: SKY_PALETTE, lum: 0.75, phase: 0.8 },
-  { orbit: 2.8, size: 0.14, palette: SKY_PALETTE, lum: 1, phase: 2.6 },
-  { orbit: 3.6, size: 0.14, palette: WATER_PALETTE, lum: 0.95, phase: 4.1 },
-  { orbit: 4.4, size: 0.11, palette: SKY_PALETTE, lum: 0.68, phase: 5.5 },
-  { orbit: 5.4, size: 0.28, palette: SKY_PALETTE, lum: 0.9, phase: 1.7, banded: true },
-].map((world) => ({ ...world, period: 18 * Math.pow(world.orbit, 1.5) }));
+  {
+    name: "Mercury", orbit: 1.8, size: 0.05, palette: MILKY_PALETTE, lum: 0.8, look: "craters", phase: 0.8,
+    kind: "rocky", km: 57.9e6, day: "176 Earth days", year: "88 Earth days", across: 4879,
+    note: "The smallest planet. A day there lasts longer than its year.",
+    moons: [],
+  },
+  {
+    name: "Venus", orbit: 2.3, size: 0.085, palette: PLANE_PALETTE, lum: 0.95, look: "smooth", phase: 2.6,
+    kind: "rocky", km: 108.2e6, day: "117 Earth days", year: "225 Earth days", across: 12104,
+    note: "The hottest planet, hot enough to melt lead.",
+    moons: [],
+  },
+  {
+    name: "Earth", orbit: 2.8, size: 0.09, palette: WATER_PALETTE, lum: 0.95, look: "earth", phase: 4.1,
+    kind: "rocky", km: 149.6e6, day: "24 hours", year: "365 days", across: 12756,
+    note: "Home, and the only world known to hold life.",
+    moons: [
+      moon("Moon", 3.4, 0.27, MILKY_PALETTE, 0.85, "craters", 384400, 3475, "27.3 days", "The only other world people have walked on."),
+    ],
+  },
+  {
+    name: "Mars", orbit: 3.3, size: 0.065, palette: SKY_PALETTE, lum: 0.8, look: "craters", phase: 5.5,
+    kind: "rocky", km: 227.9e6, day: "24 h 39 min", year: "687 Earth days", across: 6792,
+    note: "Home to Olympus Mons, the tallest volcano known.",
+    moons: [
+      moon("Phobos", 1.9, 0.13, MILKY_PALETTE, 0.55, "craters", 9376, 22.5, "7 h 39 min", "Drifting closer to Mars; one day it will break apart."),
+      moon("Deimos", 2.9, 0.1, MILKY_PALETTE, 0.6, "craters", 23463, 12.4, "30 h 18 min", "Seen from Mars, it looks like a bright star."),
+    ],
+  },
+  {
+    name: "Jupiter", orbit: 4.2, size: 0.24, palette: PLANE_PALETTE, lum: 0.88, look: "bands", spot: true, phase: 1.7,
+    kind: "gas giant", km: 778.5e6, day: "9 h 56 min", year: "11.9 Earth years", across: 142984,
+    note: "So big that all the other planets could fit inside it.",
+    moons: [
+      moon("Io", 1.8, 0.12, PLANE_PALETTE, 0.95, "spots", 421700, 3643, "1.8 days", "The most volcanic world known, with hundreds of active volcanoes."),
+      moon("Europa", 2.4, 0.11, MILKY_PALETTE, 0.95, "cracks", 670900, 3122, "3.6 days", "An ice shell over an ocean with more water than Earth's."),
+      moon("Ganymede", 3.2, 0.15, MILKY_PALETTE, 0.8, "craters", 1070400, 5268, "7.2 days", "The biggest moon in the solar system, bigger than Mercury."),
+      moon("Callisto", 4.2, 0.14, MILKY_PALETTE, 0.6, "craters", 1882700, 4821, "16.7 days", "One of the most heavily cratered surfaces known."),
+    ],
+  },
+  {
+    name: "Saturn", orbit: 5.1, size: 0.2, palette: PLANE_PALETTE, lum: 0.97, look: "bands", rings: true, phase: 3.3,
+    kind: "gas giant", km: 1432e6, day: "10 h 34 min", year: "29.4 Earth years", across: 120536,
+    note: "Light enough that it would float in water.",
+    moons: [
+      moon("Mimas", 2.5, 0.06, MILKY_PALETTE, 0.85, "crater", 185540, 396, "22 h 37 min", "A giant crater, Herschel, makes it look like the Death Star."),
+      moon("Enceladus", 2.9, 0.07, MILKY_PALETTE, 1, "smooth", 238040, 504, "1.4 days", "Geysers of icy water spray from its south pole."),
+      moon("Titan", 3.8, 0.15, PLANE_PALETTE, 0.75, "smooth", 1221870, 5150, "15.9 days", "Thick orange haze, over seas of liquid methane."),
+      moon("Iapetus", 5, 0.09, MILKY_PALETTE, 0.85, "split", 3560820, 1469, "79.3 days", "One side is dark as coal, the other bright as snow."),
+    ],
+  },
+  {
+    name: "Uranus", orbit: 5.9, size: 0.13, palette: ROUTE_PALETTE, lum: 0.78, look: "smooth", phase: 0.2,
+    kind: "ice giant", km: 2867e6, day: "17 h 14 min", year: "84 Earth years", across: 51118,
+    note: "It spins on its side, tipped over by 98°.",
+    moons: [
+      moon("Miranda", 1.8, 0.07, MILKY_PALETTE, 0.75, "cracks", 129390, 472, "1.4 days", "Home to Verona Rupes, maybe the tallest cliff known."),
+      moon("Ariel", 2.4, 0.1, MILKY_PALETTE, 0.9, "smooth", 190900, 1158, "2.5 days", "The brightest of Uranus's moons."),
+      moon("Titania", 3.2, 0.12, MILKY_PALETTE, 0.8, "craters", 435910, 1578, "8.7 days", "The biggest of Uranus's moons."),
+      moon("Oberon", 4, 0.12, MILKY_PALETTE, 0.65, "craters", 583520, 1523, "13.5 days", "The farthest of Uranus's big moons, covered in craters."),
+    ],
+  },
+  {
+    name: "Neptune", orbit: 6.6, size: 0.125, palette: WATER_PALETTE, lum: 0.82, look: "smooth", phase: 4.9,
+    kind: "ice giant", km: 4515e6, day: "16 h 6 min", year: "165 Earth years", across: 49528,
+    note: "The windiest planet, with the fastest winds known.",
+    moons: [
+      moon("Proteus", 1.9, 0.07, MILKY_PALETTE, 0.45, "craters", 117647, 420, "26 h 56 min", "One of the darkest objects in the solar system."),
+      moon("Triton", 2.9, 0.16, MILKY_PALETTE, 0.85, "smooth", 354760, 2707, "5.9 days", "It orbits backward, and has geysers of nitrogen."),
+    ],
+  },
+].map((planet) => {
+  planet.period = 18 * Math.pow(planet.orbit, 1.5);
+  planet.moons.forEach((body, k) => Object.assign(body, { planet, phase: 1.3 + k * 2.4, period: 16 * Math.pow(body.orbit, 1.5) }));
+  return planet;
+});
+// Every planet and moon, with where it is in the world (depth units) and on
+// screen (px) this frame, and whether it was drawn.
+const BODIES = PLANETS.flatMap((planet) => [planet, ...planet.moons]);
+BODIES.forEach((body, k) => Object.assign(body, {
+  seed: 101 + k * 17,
+  at: { x: 0, y: 0, z: 0, r: 0 },
+  seen: { x: 0, y: 0, r: 0, visible: false },
+  shown: false,
+}));
+// Farthest first, for drawing.
+const byDepth = BODIES.slice();
+// The camera can fly to a planet or moon and stay with it as it moves.
+const focus = { body: null, from: { x: 0, y: 0, z: 0 }, start: 0 };
+const FOCUS_TIME = 1.8;
 // The Earth: which point of it faces us (the latitude and longitude at the
 // centre of its disc, in radians), how fast that is turning (radians per
 // second), and a drag in progress. Points on it are unit vectors with x
@@ -294,7 +385,8 @@ function wrappedFbm(x, y, seed, period) {
 
 // Composition from the starting point: the star sits beside the text column,
 // and the whole Earth fills the room the text leaves free, to its left in
-// wide windows and below it in tall ones.
+// wide windows and below it in tall ones. (The Moon moves through the real
+// sky; see placeMoon.)
 function composeScene() {
   const W = viewWidth;
   const H = viewHeight;
@@ -374,6 +466,8 @@ function projectScene() {
   project(home.sun, DEPTH.sun, FADE.sun, seen.sun);
   project(home.hole, DEPTH.hole, FADE.hole, seen.hole);
   project(home.moon, DEPTH.moon, FADE.moon, seen.moon);
+  seen.moon.fade *= moonSky.up;
+  seen.moon.visible = seen.moon.visible && moonSky.up > 0;
   project(home.earth, DEPTH.earth, FADE.earth, seen.earth);
 }
 
@@ -435,7 +529,8 @@ function inView(object) {
 
 // Once nothing has been in view for a while, glide smoothly back home.
 function returnHome(dt) {
-  const empty = !(inView(seen.sun) || inView(seen.hole) || inView(seen.moon) || inView(seen.earth));
+  const empty = !(inView(seen.sun) || inView(seen.hole) || inView(seen.moon) || inView(seen.earth))
+    && !PLANETS.some((planet) => planet.shown && planet.seen.r > 8);
   lost.time = empty && Math.abs(thrust.speed) < 0.05 ? lost.time + dt : 0;
   if (lost.time > LOST_DELAY) lost.homing = true;
   if (!lost.homing) return;
@@ -462,6 +557,78 @@ function sunOverhead(ms) {
   const ascension = Math.atan2(Math.cos(tilt) * Math.sin(along), Math.cos(along));
   const longitude = ascension - (280.46061837 + 360.98564736629 * days) * RAD;
   return [Math.cos(declination) * Math.cos(longitude), Math.cos(declination) * Math.sin(longitude), Math.sin(declination)];
+}
+
+// Where the Moon is at a moment, in the same way: the usual low-precision
+// lunar theory, good to about a third of a degree.
+function moonOverhead(ms) {
+  const days = ms / 86400000 - 10957.5;
+  const mean = (218.316 + 13.176396 * days) * RAD;
+  const anomaly = (134.963 + 13.064993 * days) * RAD;
+  const node = (93.272 + 13.22935 * days) * RAD;
+  const elongation = (297.85 + 12.190749 * days) * RAD;
+  const sunAnomaly = (357.529 + 0.98560028 * days) * RAD;
+  const along = mean + (6.289 * Math.sin(anomaly) - 1.274 * Math.sin(anomaly - 2 * elongation) + 0.658 * Math.sin(2 * elongation)
+    + 0.214 * Math.sin(2 * anomaly) - 0.186 * Math.sin(sunAnomaly) - 0.114 * Math.sin(2 * node)) * RAD;
+  const above = (5.128 * Math.sin(node) + 0.281 * Math.sin(anomaly + node) + 0.278 * Math.sin(anomaly - node)
+    + 0.173 * Math.sin(2 * elongation - node)) * RAD;
+  const tilt = (23.439 - 3.6e-7 * days) * RAD;
+  const x = Math.cos(above) * Math.cos(along);
+  const y = Math.cos(above) * Math.sin(along);
+  const z = Math.sin(above);
+  const declination = Math.asin(y * Math.sin(tilt) + z * Math.cos(tilt));
+  const ascension = Math.atan2(y * Math.cos(tilt) - z * Math.sin(tilt), x);
+  const longitude = ascension - (280.46061837 + 360.98564736629 * days) * RAD;
+  return [Math.cos(declination) * Math.cos(longitude), Math.cos(declination) * Math.sin(longitude), Math.sin(declination)];
+}
+
+// How high (altitude) and which way (azimuth, clockwise from north) something
+// in a direction from the Earth stands in Stanford's sky.
+const SKY_LAT = 37.43 * RAD;
+const SKY_LON = -122.17 * RAD;
+function inStanfordSky([x, y, z]) {
+  const cosLat = Math.cos(SKY_LAT);
+  const sinLat = Math.sin(SKY_LAT);
+  const cosLon = Math.cos(SKY_LON);
+  const sinLon = Math.sin(SKY_LON);
+  const up = cosLat * cosLon * x + cosLat * sinLon * y + sinLat * z;
+  const east = -sinLon * x + cosLon * y;
+  const north = -sinLat * cosLon * x - sinLat * sinLon * y + cosLat * z;
+  const azimuth = Math.atan2(east, north);
+  return { altitude: Math.asin(clamp(up, -1, 1)), azimuth: azimuth < 0 ? azimuth + Math.PI * 2 : azimuth };
+}
+
+// The scene's Moon hangs where the real Moon is in the sky over Stanford, as
+// if the scene's right side (all of the top, on tall screens) were the
+// southern sky: it rises low on the left, climbs as it heads south, sets on
+// the right, and is gone while it is below the horizon. It shows its real
+// phase, lit from where the Sun really is: `light` is that direction, in
+// screen terms (x right, y down, z toward us), and `up` how far it has risen.
+const moonSky = { up: 0, light: new Float32Array([0, 0, 1]) };
+function placeMoon(ms) {
+  const moonAt = moonOverhead(ms);
+  const sunAt = sunOverhead(ms);
+  const moon = inStanfordSky(moonAt);
+  const sun = inStanfordSky(sunAt);
+  // Seen from Stanford rather than the Earth's centre, the Moon sits up to a
+  // degree lower.
+  moon.altitude -= 0.0166 * Math.cos(moon.altitude);
+  const across = clamp((moon.azimuth - Math.PI / 2) / Math.PI, 0, 1);
+  const high = clamp(moon.altitude / (75 * RAD), 0, 1);
+  if (viewWidth >= viewHeight * 1.1) {
+    home.moon.x = viewWidth * (0.58 + 0.39 * across);
+    home.moon.y = viewHeight * (0.9 - 0.78 * high);
+  } else {
+    home.moon.x = viewWidth * (0.1 + 0.8 * across);
+    home.moon.y = viewHeight * (0.3 - 0.25 * high);
+  }
+  moonSky.up = clamp((moon.altitude + 3 * RAD) / (4 * RAD), 0, 1);
+  // The phase: the Sun-Moon-Earth angle, and which way the Sun lies from the
+  // Moon across the sky (up toward the zenith, right toward the west).
+  const phase = Math.PI - Math.acos(clamp(moonAt[0] * sunAt[0] + moonAt[1] * sunAt[1] + moonAt[2] * sunAt[2], -1, 1));
+  const turn = sun.azimuth - moon.azimuth;
+  const bearing = Math.atan2(Math.sin(turn) * Math.cos(sun.altitude), Math.cos(moon.altitude) * Math.sin(sun.altitude) - Math.sin(moon.altitude) * Math.cos(sun.altitude) * Math.cos(turn));
+  moonSky.light.set([Math.sin(bearing) * Math.sin(phase), -Math.cos(bearing) * Math.sin(phase), Math.cos(phase)]);
 }
 
 // The Earth starts with its morning side to us, so it is lit from the right
@@ -538,8 +705,10 @@ function cellRow(y) {
 
 // The foreground overlay lies over everything, even the Earth: two bytes a
 // cell, palette and level as above, then a glyph from the sheet (0 picks one
-// from the ramp by brightness). Brighter things win a cell, unless forced,
-// and a forced cell is kept clear of planes.
+// from the ramp by brightness), plus SEE_THROUGH to leave the star's glow
+// behind it. Brighter things win a cell, unless forced, and a forced cell is
+// kept clear of planes.
+const SEE_THROUGH = 128;
 function plotNear(x, y, lum, palette, glyph = 0, force = false) {
   const c = cellColumn(x);
   const r = cellRow(y);
@@ -710,60 +879,207 @@ function drawLoner() {
   }
 }
 
-// The star's planets: each a small disc on a tilted orbit, lit on the side
-// facing the star; hidden behind the star on the far half of its orbit and a
-// dark silhouette against it on the near half.
-function drawPlanets(t) {
-  const sun = seen.sun;
-  if (!sun.visible) return;
-  const sunX = ((home.sun.x - viewWidth / 2) * DEPTH.sun) / focal;
-  const sunY = ((home.sun.y - viewHeight / 2) * DEPTH.sun) / focal;
+// ── the Sun's planets and their moons ─────────────────────────────────────
+
+const sunWorld = { x: 0, y: 0 };
+
+// Where every planet and moon is at a moment, in the world.
+function placeSolarSystem(t) {
+  sunWorld.x = ((home.sun.x - viewWidth / 2) * DEPTH.sun) / focal;
+  sunWorld.y = ((home.sun.y - viewHeight / 2) * DEPTH.sun) / focal;
   const sunR = (home.sun.r * DEPTH.sun) / focal;
-  for (const world of PLANETS) {
-    const angle = world.phase + (t / world.period) * Math.PI * 2;
-    const a = world.orbit * sunR;
-    const ox = Math.cos(angle) * a;
-    const oy = Math.sin(angle) * a * ORBIT_SQUASH;
-    // The lower half of the orbit swings toward the camera.
-    const oz = -Math.sin(angle) * a * ORBIT_DEPTH;
-    const point = projectPoint(
-      sunX + ox * Math.cos(ORBIT_TILT) - oy * Math.sin(ORBIT_TILT),
-      sunY + ox * Math.sin(ORBIT_TILT) + oy * Math.cos(ORBIT_TILT),
-      DEPTH.sun + oz,
-    );
-    if (!point) continue;
-    const px = point.x;
-    const py = point.y;
-    const size = Math.max(world.size * sunR * point.scale, cellW * 0.8);
-    const front = oz < 0;
-    let toSunX = sun.x - px;
-    let toSunY = sun.y - py;
-    const toSun = Math.hypot(toSunX, toSunY) || 1;
-    toSunX /= toSun;
-    toSunY /= toSun;
-    const c0 = Math.floor(((px - size + MARGIN) * pixelRatio) / cellPxW);
-    const c1 = Math.floor(((px + size + MARGIN) * pixelRatio) / cellPxW);
-    const r0 = Math.floor(((py - size + MARGIN) * pixelRatio) / cellPxH);
-    const r1 = Math.floor(((py + size + MARGIN) * pixelRatio) / cellPxH);
-    const centreC = Math.floor(((px + MARGIN) * pixelRatio) / cellPxW);
-    const centreR = Math.floor(((py + MARGIN) * pixelRatio) / cellPxH);
-    for (let r = r0; r <= r1; r++) {
-      for (let c = c0; c <= c1; c++) {
-        if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
-        const dx = cellCentreX(c) - px;
-        const dy = cellCentreY(r) - py;
-        // Tiny worlds still claim the one cell they sit in.
-        if (Math.hypot(dx, dy) > size && !(c === centreC && r === centreR)) continue;
-        if (onSun(cellCentreX(c), cellCentreY(r))) {
-          if (front) overlay[r * cols + c] = SILHOUETTE << PALETTE_SHIFT;
-          continue;
-        }
-        const lit = 0.6 + 0.4 * clamp((dx * toSunX + dy * toSunY) / size, -1, 1);
-        const bands = world.banded ? 0.82 + 0.18 * Math.sin((dy / size) * 5) : 1;
-        plotCell(c, r, world.lum * lit * bands * sun.fade, world.palette);
-      }
+  for (const planet of PLANETS) {
+    orbitAround(planet, sunWorld.x, sunWorld.y, DEPTH.sun, planet.orbit * sunR, t);
+    planet.at.r = planet.size * sunR;
+    for (const body of planet.moons) {
+      orbitAround(body, planet.at.x, planet.at.y, planet.at.z, body.orbit * planet.at.r, t);
+      body.at.r = body.size * planet.at.r;
     }
   }
+}
+
+// A body's place on its orbit, in the tilted plane: the lower half of every
+// orbit swings toward the camera.
+function orbitAround(body, x, y, z, radius, t) {
+  const angle = body.held ?? body.phase + (t / body.period) * Math.PI * 2;
+  const ox = Math.cos(angle) * radius;
+  const oy = Math.sin(angle) * radius * ORBIT_SQUASH;
+  body.at.x = x + ox * Math.cos(ORBIT_TILT) - oy * Math.sin(ORBIT_TILT);
+  body.at.y = y + ox * Math.sin(ORBIT_TILT) + oy * Math.cos(ORBIT_TILT);
+  body.at.z = z - Math.sin(angle) * radius * ORBIT_DEPTH;
+}
+
+function projectBodies() {
+  for (const body of BODIES) {
+    const point = projectPoint(body.at.x, body.at.y, body.at.z);
+    body.seen.visible = Boolean(point);
+    if (!point) continue;
+    body.seen.x = point.x;
+    body.seen.y = point.y;
+    body.seen.r = body.at.r * point.scale;
+  }
+}
+
+// How bright a body's surface is at (u, v) across its disc (each -1 to 1),
+// and in which palette, for its look.
+const surface = { lum: 1, palette: 0 };
+function surfaceAt(body, u, v) {
+  const seed = body.seed;
+  surface.lum = 1;
+  surface.palette = body.palette;
+  if (body.look === "bands") {
+    surface.lum = 0.8 + 0.2 * Math.sin(v * 11 + 2 * wrappedNoise(u * 2 + seed, v * 5, seed, 997));
+    // Jupiter's Great Red Spot.
+    if (body.spot && ((u - 0.3) / 0.22) ** 2 + ((v - 0.32) / 0.12) ** 2 < 1) surface.palette = SKY_PALETTE;
+  } else if (body.look === "craters") {
+    surface.lum = 0.75 + 0.25 * wrappedNoise(u * 4 + seed, v * 4, seed, 997) - (wrappedNoise(u * 9 + seed, v * 9, seed + 1, 997) > 0.72 ? 0.25 : 0);
+  } else if (body.look === "crater") {
+    const d = Math.hypot(u + 0.35, v + 0.1) / 0.36;
+    if (d < 1) surface.lum = d > 0.8 ? 1.1 : 0.7;
+  } else if (body.look === "cracks") {
+    surface.lum = Math.abs(Math.sin(u * 7 + v * 3 + 3 * wrappedNoise(u * 2 + seed, v * 2, seed, 997))) < 0.12 ? 0.6 : 1;
+  } else if (body.look === "spots") {
+    surface.lum = 0.8 + 0.25 * wrappedNoise(u * 5 + seed, v * 5, seed, 997);
+    if (wrappedNoise(u * 6 + seed, v * 6, seed + 2, 997) > 0.68) surface.palette = SKY_PALETTE;
+  } else if (body.look === "split") {
+    surface.lum = u * 0.9 + v * 0.3 < 0 ? 0.35 : 1;
+  } else if (body.look === "earth") {
+    surface.lum = wrappedNoise(u * 3 + seed, v * 3, seed, 997) > 0.55 ? 1.12 : 0.9;
+  }
+}
+
+// A planet or moon: a disc lit from the Sun (and a little from the camera, so
+// its night side isn't lost), in its look, and Saturn's rings. Far off it
+// lies behind the overlay's stars, hidden behind the star on the far half of
+// its orbit and a dark silhouette against it on the near half; once the
+// camera is past the black hole, nothing nearer is in the way, and it lies in
+// the foreground, solid.
+function drawBody(body, near) {
+  const spot = body.seen;
+  body.shown = false;
+  // Moons show once their planet is big enough to keep them apart.
+  if (!spot.visible || (body.planet && body.planet.seen.r < 4)) return;
+  const size = Math.max(spot.r, cellW * 0.6);
+  const reach = body.rings ? size * 2.3 : size;
+  if (spot.x + reach < -MARGIN || spot.x - reach > viewWidth + MARGIN || spot.y + reach < -MARGIN || spot.y - reach > viewHeight + MARGIN || size > viewWidth * 4) return;
+  body.shown = true;
+  const fade = near ? 1 : seen.sun.fade;
+  const behind = body.at.z > DEPTH.sun;
+  let lx = sunWorld.x - body.at.x;
+  let ly = sunWorld.y - body.at.y;
+  let lz = DEPTH.sun - body.at.z;
+  const length = Math.hypot(lx, ly, lz) || 1;
+  lx /= length;
+  ly /= length;
+  lz /= length;
+  const put = (x, y, c, r, lum, palette, clear = size < cellW * 3) => {
+    if (near) plotNear(x, y, lum, palette, clear ? SEE_THROUGH : 0, true);
+    else plotCell(c, r, lum, palette);
+  };
+  const centreC = cellColumn(spot.x);
+  const centreR = cellRow(spot.y);
+  for (let r = Math.max(0, cellRow(spot.y - size)); r <= Math.min(rows - 1, cellRow(spot.y + size)); r++) {
+    for (let c = Math.max(0, cellColumn(spot.x - size)); c <= Math.min(cols - 1, cellColumn(spot.x + size)); c++) {
+      const x = cellCentreX(c);
+      const y = cellCentreY(r);
+      const u = (x - spot.x) / size;
+      const v = (y - spot.y) / size;
+      const d2 = u * u + v * v;
+      // Tiny worlds still claim the one cell they sit in.
+      if (d2 > 1 && !(c === centreC && r === centreR)) continue;
+      if (onSun(x, y)) {
+        if (behind) continue;
+        if (!near) {
+          overlay[r * cols + c] = SILHOUETTE << PALETTE_SHIFT;
+          continue;
+        }
+      }
+      const nz = -Math.sqrt(Math.max(0, 1 - d2));
+      const lit = 0.25 + 0.6 * Math.max(0, u * lx + v * ly + nz * lz) - 0.45 * nz;
+      surfaceAt(body, u, v);
+      put(x, y, c, r, Math.min(1, body.lum * lit * surface.lum) * fade, surface.palette);
+    }
+  }
+  if (!body.rings) return;
+  // The rings, in the orbital plane; their far half passes behind the planet.
+  const outer = size * 2.25;
+  for (let r = Math.max(0, cellRow(spot.y - outer * 0.5)); r <= Math.min(rows - 1, cellRow(spot.y + outer * 0.5)); r++) {
+    for (let c = Math.max(0, cellColumn(spot.x - outer)); c <= Math.min(cols - 1, cellColumn(spot.x + outer)); c++) {
+      const x = cellCentreX(c);
+      const y = cellCentreY(r);
+      const dx = x - spot.x;
+      const dy = y - spot.y;
+      const ax = dx * Math.cos(ORBIT_TILT) + dy * Math.sin(ORBIT_TILT);
+      const ay = -dx * Math.sin(ORBIT_TILT) + dy * Math.cos(ORBIT_TILT);
+      const rho = Math.hypot(ax, ay / ORBIT_SQUASH) / size;
+      if (rho < 1.3 || rho > 2.25 || (rho > 1.85 && rho < 1.95)) continue;
+      if (ay < 0 && dx * dx + dy * dy < size * size) continue;
+      if (behind && onSun(x, y)) continue;
+      put(x, y, c, r, body.lum * 0.7 * (0.8 + 0.2 * Math.sin(rho * 24)) * fade, PLANE_PALETTE, true);
+    }
+  }
+}
+
+function drawPlanets() {
+  const near = camera.z > DEPTH.hole;
+  byDepth.sort((a, b) => b.at.z - a.at.z);
+  for (const body of byDepth) drawBody(body, near);
+}
+
+// The planet or moon on show under a point on screen (or within reach, px),
+// the one nearest its middle; or null.
+function bodyAt(x, y, reach) {
+  let best = null;
+  let nearest = 1;
+  for (const body of BODIES) {
+    if (!body.shown) continue;
+    const score = Math.hypot(x - body.seen.x, y - body.seen.y) / (Math.max(body.seen.r, cellW) + reach);
+    if (score < nearest) {
+      best = body;
+      nearest = score;
+    }
+  }
+  return best;
+}
+
+function focusEase(t) {
+  const progress = clamp((t - focus.start) / FOCUS_TIME, 0, 1);
+  return progress < 0.5 ? 4 * progress ** 3 : 1 - (2 - 2 * progress) ** 3 / 2;
+}
+
+// A moon being visited swings round to the near side of its planet as the
+// camera flies over, and holds there while the camera is with it, so the
+// planet stays behind it (off to the left on wide screens, clear of the card).
+function swingMoon(t) {
+  const body = focus.body;
+  if (body.swing) body.held = body.swing.from + (body.swing.to - body.swing.from) * focusEase(t);
+}
+
+// A held moon picks its orbit back up from where it is.
+function resume(body, t) {
+  if (body.held === undefined) return;
+  body.phase = body.held - (t / body.period) * Math.PI * 2;
+  body.held = undefined;
+  body.swing = null;
+}
+
+// Flying to a planet or moon: the camera eases over until it fills a good part
+// of the screen (leaving room for its card), then stays with it.
+function followFocus(t) {
+  const body = focus.body;
+  const wide = viewWidth >= viewHeight * 1.1;
+  const x = wide ? viewWidth * 0.34 : viewWidth / 2;
+  const y = wide ? viewHeight / 2 : viewHeight * 0.3;
+  const size = Math.min(viewWidth, viewHeight) * (body.planet ? 0.12 : 0.1);
+  const ahead = (focal * body.at.r) / size;
+  const ease = focusEase(t);
+  const to = [body.at.x - ((x - viewWidth / 2) * ahead) / focal, body.at.y - ((y - viewHeight / 2) * ahead) / focal, body.at.z - ahead];
+  camera.x = focus.from.x + (to[0] - focus.from.x) * ease;
+  camera.y = focus.from.y + (to[1] - focus.from.y) * ease;
+  camera.z = focus.from.z + (to[2] - focus.from.z) * ease;
+  thrust.speed = 0;
+  lost.time = 0;
+  lost.homing = false;
 }
 
 // Infalling stars accelerate: gravity grows as 1/r² and keeps adding to their
@@ -1245,6 +1561,7 @@ function drawFlights(t) {
 }
 
 function pickPlane(k) {
+  if (shownBody) leave();
   picked = { ...reportOf(k), info: null, route: null, looking: true };
   hovered = -1;
   // Which way it is heading on screen as it is picked, to keep the card
@@ -1293,8 +1610,8 @@ function lookUp(plane) {
 // ── the flight card ───────────────────────────────────────────────────────
 
 const flightCard = document.querySelector(".flight");
-const flightArt = flightCard.querySelector(".flight-art");
-const flightSummary = flightCard.querySelector(".flight-summary");
+const flightArt = flightCard.querySelector(".card-art");
+const flightSummary = flightCard.querySelector(".card-summary");
 // Characters between the frame's margins.
 const CARD_WIDTH = 36;
 const imperial = /^en-(US|GB|LR|MM)$/i.test(navigator.language || "");
@@ -1351,6 +1668,30 @@ function fit(text, width) {
   return text.length > width ? `${text.slice(0, width - 1)}…` : text;
 }
 
+// Words in lines of at most `width` characters, at most `count` of them, the
+// last cut short with "…" if they don't all fit.
+function wrap(text, width, count) {
+  const lines = [];
+  for (const word of text.split(" ").filter(Boolean)) {
+    if (lines.length && lines[lines.length - 1].length + 1 + word.length <= width) lines[lines.length - 1] += ` ${word}`;
+    else lines.push(word);
+  }
+  const kept = lines.slice(0, count).map((line) => fit(line, width));
+  if (lines.length > count) kept[count - 1] = `${kept[count - 1].slice(0, width - 1)}…`;
+  return kept;
+}
+
+// An airport's own name, to go under its city, without the city's name when
+// it starts with it: "Incheon International" under Seoul, "Midway
+// International" under Chicago. Nothing when the city line already shows it.
+function airportName(place) {
+  const city = place.municipality || "";
+  let name = (place.name || "").replace(/\s+Airport$/i, "");
+  if (!city) return "";
+  if (name.toLowerCase().startsWith(`${city.toLowerCase()} `)) name = name.slice(city.length + 1);
+  return name.replace(/^Airport\s+/i, "");
+}
+
 function distanceText(radians) {
   const km = radians * EARTH_KM;
   return imperial ? `${Math.round(km * 0.621371).toLocaleString()} mi` : `${Math.round(km).toLocaleString()} km`;
@@ -1368,16 +1709,13 @@ function clockText(ms) {
   return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-// The card pops up beside the picked plane, behind it so the way ahead stays
-// in view: on the side it came from if there is room, else above or below,
-// else ahead. It follows the plane as the Earth turns or the camera flies.
-function placeCard(x, y) {
+// A card pops up beside what it is about, a clear distance (px) from it and
+// away from the way it is heading (dx, dy): on the side behind it if there is
+// room, else above or below, else ahead. It follows as things move.
+function positionCard(card, x, y, clear, dx, dy) {
   const margin = 12;
-  const width = flightCard.offsetWidth;
-  const height = flightCard.offsetHeight;
-  // Clear of the plane and its brackets.
-  const clear = (3.5 * cellPxW) / pixelRatio + 10;
-  const { dx, dy } = picked.ahead;
+  const width = card.offsetWidth;
+  const height = card.offsetHeight;
   const beside = (right) => [right ? x + clear : x - clear - width, y - height / 2, true];
   const across = (below) => [x - width / 2, below ? y + clear : y - clear - height, false];
   const spots = [beside(dx < 0), across(dy < 0), beside(dx >= 0), across(dy >= 0)];
@@ -1386,7 +1724,55 @@ function placeCard(x, y) {
     : top >= margin && top + height <= viewHeight - margin)) ?? spots[0];
   left = clamp(left, margin, viewWidth - width - margin);
   top = clamp(top, margin, viewHeight - height - margin);
-  flightCard.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
+  card.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
+}
+
+// The flight card keeps behind its plane, so the way ahead stays in view,
+// and clear of the plane and its brackets.
+function placeCard(x, y) {
+  positionCard(flightCard, x, y, (3.5 * cellPxW) / pixelRatio + 10, picked.ahead.dx, picked.ahead.dy);
+}
+
+// For laying out a card: add() a line of runs, spread() two texts to its ends.
+function cardLines() {
+  const lines = [];
+  const add = (...runs) => lines.push(runs);
+  const spread = (left, right, leftStyle = "", rightStyle = "") => {
+    const room = CARD_WIDTH - right.length - 1;
+    add([fit(left, room).padEnd(CARD_WIDTH - right.length), leftStyle], [right, rightStyle]);
+  };
+  return { lines, add, spread };
+}
+
+// Cards are drawn in characters, like everything else: a box-drawn frame
+// with a title in its top edge (and a gap for the close button), around
+// lines of runs, each [text, style], or [text, style, action] for a button.
+function paintCard(art, title, lines) {
+  const frame = (text) => [text, "frame"];
+  const head = ` ${title} `;
+  const rows = [[frame(`╭─${head}${"─".repeat(CARD_WIDTH - 5 - head.length)}     ─╮`)]];
+  rows.push([frame("│ "), [" ".repeat(CARD_WIDTH)], frame(" │")]);
+  for (const runs of lines) {
+    const length = runs.reduce((total, [text]) => total + text.length, 0);
+    rows.push([frame("│ "), ...runs, [" ".repeat(Math.max(0, CARD_WIDTH - length))], frame(" │")]);
+  }
+  rows.push([frame(`╰${"─".repeat(CARD_WIDTH + 2)}╯`)]);
+  art.replaceChildren(...rows.map((runs) => {
+    const row = document.createElement("div");
+    for (const [text, style, action] of runs) {
+      const run = document.createElement(action ? "button" : "span");
+      if (action) {
+        run.type = "button";
+        run.addEventListener("click", action);
+      }
+      if (style) run.className = style;
+      // Frames and big letters mean nothing read aloud.
+      if (style === "frame" || style?.includes("big")) run.setAttribute("aria-hidden", "true");
+      run.textContent = text;
+      row.append(run);
+    }
+    return row;
+  }));
 }
 
 function ageText(seconds) {
@@ -1403,12 +1789,7 @@ function renderCard() {
   const airline = plane.info?.airline;
   const aircraft = plane.info?.aircraft;
   const route = plane.route;
-  const lines = [];
-  const add = (...runs) => lines.push(runs);
-  const spread = (left, right, leftStyle = "", rightStyle = "") => {
-    const room = CARD_WIDTH - right.length - 1;
-    add([fit(left, room).padEnd(CARD_WIDTH - right.length), leftStyle], [right, rightStyle]);
-  };
+  const { lines, add, spread } = cardLines();
   const callsign = plane.callsign || plane.hex.toUpperCase();
   // The flight number, when the airline has a two-character IATA code.
   const iata = /^([A-Z]{2}|[A-Z]\d|\d[A-Z])(\d{1,4}[A-Z]?)$/.exec(plane.info?.flightroute?.callsign_iata || "");
@@ -1444,6 +1825,8 @@ function renderCard() {
       spread(from, to, "bright", "bright");
     }
     spread(route.origin.municipality || route.origin.name || "", route.destination.municipality || route.destination.name || "", "dim", "dim");
+    const names = [airportName(route.origin), airportName(route.destination)].map((name) => wrap(name, (CARD_WIDTH - 2) / 2, 3));
+    for (let line = 0; line < Math.max(names[0].length, names[1].length); line++) spread(names[0][line] || "", names[1][line] || "", "faint", "faint");
     add([""]);
     const done = Math.round(progress * (CARD_WIDTH - 1));
     add(["━".repeat(done), "gold"], ["+", "gold"], ["─".repeat(CARD_WIDTH - 1 - done), "faint"]);
@@ -1472,35 +1855,182 @@ function renderCard() {
   add([""]);
   spread("", ageText(now / 1000 - plane.reported), "", "faint");
 
-  // The top edge carries the callsign, and leaves a gap for the close button.
-  const title = ` ${callsign} `;
-  const frame = (text) => [text, "frame"];
-  const rows = [[frame(`╭─${title}${"─".repeat(CARD_WIDTH - 5 - title.length)}     ─╮`)]];
-  rows.push([frame("│ "), [" ".repeat(CARD_WIDTH)], frame(" │")]);
-  for (const runs of lines) {
-    const length = runs.reduce((total, [text]) => total + text.length, 0);
-    rows.push([frame("│ "), ...runs, [" ".repeat(Math.max(0, CARD_WIDTH - length))], frame(" │")]);
-  }
-  rows.push([frame(`╰${"─".repeat(CARD_WIDTH + 2)}╯`)]);
-  flightArt.replaceChildren(...rows.map((runs) => {
-    const row = document.createElement("div");
-    for (const [text, style] of runs) {
-      const run = document.createElement("span");
-      if (style) run.className = style;
-      run.textContent = text;
-      row.append(run);
-    }
-    return row;
-  }));
+  paintCard(flightArt, callsign, lines);
   flightSummary.textContent = summary;
 }
 
-flightCard.querySelector(".flight-close").addEventListener("click", closeCard);
+flightCard.querySelector(".card-close").addEventListener("click", closeCard);
 // The frame and big letters come from the font's box-drawing subset; fetch it
 // before the first card needs it.
 document.fonts?.load('500 12px "Geist Mono"', "╭█");
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && picked) closeCard();
+  if (event.key !== "Escape") return;
+  if (shownBody) leave();
+  else if (picked) closeCard();
+});
+
+// ── the planet card ───────────────────────────────────────────────────────
+
+const worldCard = document.querySelector(".world");
+const worldArt = worldCard.querySelector(".card-art");
+// The planet or moon whose card is up, whether it stays up when the pointer
+// leaves (once clicked, while the camera is with it), and what the pointer
+// is over.
+let shownBody = null;
+let bodyPinned = false;
+let hoveredBody = null;
+let overWorldCard = false;
+let hideTimer = 0;
+
+// A distance or size, to three figures.
+function lengthText(km) {
+  const value = imperial ? km * 0.621371 : km;
+  return `${Number(value.toPrecision(3)).toLocaleString()} ${imperial ? "mi" : "km"}`;
+}
+
+// A distance from the Sun, in millions or billions.
+function farText(km) {
+  const value = imperial ? km * 0.621371 : km;
+  const unit = imperial ? "mi" : "km";
+  return value >= 1e9 ? `${(value / 1e9).toFixed(1)} billion ${unit}` : `${Math.round(value / 1e6)} million ${unit}`;
+}
+
+function renderWorld(body) {
+  const { lines, add, spread } = cardLines();
+  const planet = body.planet;
+  for (const line of bigLines(body.name.toUpperCase())) add([line, "bright big"]);
+  const order = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th"][PLANETS.indexOf(body)];
+  add([planet ? `a moon of ${planet.name}` : `${order} planet from the Sun · ${body.kind}`, "dim"]);
+  add([""]);
+  let summary;
+  if (planet) {
+    spread("across", lengthText(body.across), "dim");
+    spread(`from ${planet.name}`, lengthText(body.km), "dim");
+    spread("one orbit", body.orbitTime, "dim");
+    summary = `${body.name}, a moon of ${planet.name}: ${lengthText(body.across)} across, ${lengthText(body.km)} from ${planet.name}, once round it every ${body.orbitTime}.`;
+  } else {
+    spread("from the Sun", farText(body.km), "dim");
+    spread("a day", body.day, "dim");
+    spread("a year", body.year, "dim");
+    spread("across", lengthText(body.across), "dim");
+    summary = `${body.name}, the ${order} planet from the Sun: ${farText(body.km)} from the Sun; a day lasts ${body.day} and a year ${body.year}.`;
+  }
+  add([""]);
+  for (const line of wrap(body.note, CARD_WIDTH, 3)) add([line]);
+  add([""]);
+  // Moons to fly to; on a moon, its planet and its siblings.
+  const links = planet
+    ? [[`‹ ${planet.name}`, planet], ...planet.moons.filter((other) => other !== body).map((other) => [`› ${other.name}`, other])]
+    : body.moons.map((other) => [`› ${other.name}`, other]);
+  if (!planet) add([body.moons.length ? "notable moons" : "no moons", "faint"]);
+  let row = [];
+  let length = 0;
+  for (const [text, target] of links) {
+    if (length && length + 2 + text.length > CARD_WIDTH) {
+      add(...row);
+      row = [];
+      length = 0;
+    }
+    if (length) {
+      row.push(["  "]);
+      length += 2;
+    }
+    row.push([text, "link", () => visit(target)]);
+    length += text.length;
+  }
+  if (row.length) add(...row);
+  paintCard(worldArt, body.name.toUpperCase(), lines);
+  worldCard.setAttribute("aria-label", summary);
+}
+
+function showWorld(body, pin) {
+  clearTimeout(hideTimer);
+  if (pin) {
+    bodyPinned = true;
+    if (picked) closeCard();
+  }
+  if (shownBody !== body) {
+    shownBody = body;
+    renderWorld(body);
+  }
+  worldCard.hidden = false;
+  placeWorldCard();
+}
+
+function hideWorld() {
+  shownBody = null;
+  bodyPinned = false;
+  worldCard.hidden = true;
+}
+
+// The card stays beside its planet or moon, past Saturn's rings.
+function placeWorldCard() {
+  const body = shownBody;
+  if (!body || !body.shown) return;
+  const size = Math.max(body.seen.r, cellW) * (body.rings ? 2.3 : 1);
+  positionCard(worldCard, body.seen.x, body.seen.y, size + 12, -1, 1);
+}
+
+// Hovering a planet or moon shows its card, which lingers a moment after the
+// pointer leaves, long enough to reach it.
+function hoverWorld(body) {
+  hoveredBody = body;
+  if (bodyPinned || picked) return;
+  clearTimeout(hideTimer);
+  if (body) {
+    showWorld(body, false);
+    return;
+  }
+  if (!shownBody || overWorldCard) return;
+  hideTimer = setTimeout(() => {
+    if (!bodyPinned && !overWorldCard && !hoveredBody) hideWorld();
+  }, 300);
+}
+
+// Flies the camera to a planet or moon, and keeps its card up.
+function visit(body) {
+  const t = performance.now() / 1000;
+  for (const other of BODIES) if (other !== body) resume(other, t);
+  focus.body = body;
+  focus.from = { x: camera.x, y: camera.y, z: camera.z };
+  focus.start = t;
+  document.body.classList.add("visiting");
+  if (body.planet && body.held === undefined) {
+    const angle = body.phase + (t / body.period) * Math.PI * 2;
+    const near = Math.PI / 2 - (viewWidth >= viewHeight * 1.1 ? 0.6 : 0);
+    body.swing = { from: angle, to: angle + Math.atan2(Math.sin(near - angle), Math.cos(near - angle)) };
+  }
+  showWorld(body, true);
+}
+
+function unfocus() {
+  if (focus.body) resume(focus.body, performance.now() / 1000);
+  focus.body = null;
+  document.body.classList.remove("visiting");
+}
+
+// Closing the card brings the camera home from wherever it flew.
+function leave() {
+  if (focus.body) lost.homing = true;
+  unfocus();
+  hideWorld();
+}
+
+// Scrolling takes the camera back from a planet or moon it is with.
+function release() {
+  if (!focus.body) return;
+  unfocus();
+  hideWorld();
+}
+
+worldCard.querySelector(".card-close").addEventListener("click", leave);
+worldCard.addEventListener("pointerenter", () => {
+  overWorldCard = true;
+  clearTimeout(hideTimer);
+});
+worldCard.addEventListener("pointerleave", () => {
+  overWorldCard = false;
+  hoverWorld(hoveredBody);
 });
 setInterval(() => {
   if (picked) renderCard();
@@ -1605,6 +2135,7 @@ function buildScene() {
   foreground = new Uint8Array(cells * 2);
   taken = new Uint8Array(cells);
   seedStars();
+  placeMoon(Date.now());
   projectScene();
   if (gpu) uploadScene();
   else drawStaticFrame();
@@ -1642,12 +2173,13 @@ uniform vec3 transit;
 uniform vec4 hole;
 uniform float ringWidth;
 uniform vec4 moon;
-uniform vec2 moonLight;
+uniform vec3 moonSun;
 uniform vec4 earth;
 uniform mat3 globe;
 uniform vec3 sunView;
 uniform float milkyWidth;
 uniform float milkyOffset;
+uniform float calmAmount;
 
 const float TOP = ${LEVEL_MASK}.0;
 const float DISK_TILT = ${DISK_TILT};
@@ -1804,13 +2336,13 @@ void main() {
   }
 
   float front = 0.0;
-  // The moon: grey and cratered, lit from the star's side with a little
-  // earthshine on its night side.
+  // The moon: grey and cratered, in its real phase, with a little earthshine
+  // on its night side.
   if (moon.z > 0.0) {
     vec2 m = (p - moon.xy) / moon.z;
     float m2 = dot(m, m);
     if (m2 <= 1.0) {
-      float lambert = max(0.0, dot(vec3(m, sqrt(1.0 - m2)), vec3(moonLight, 1.3)) / sqrt(2.69));
+      float lambert = max(0.0, dot(vec3(m, sqrt(1.0 - m2)), moonSun));
       vec2 q = m * 3.2 + 7.0;
       float maria = clamp((fbm2(q * 0.6 + 11.3) - 0.5) * 3.0, 0.0, 1.0);
       float craters = pow(1.0 - abs(noise2(q * 2.2 + 12.7) * 2.0 - 1.0), 6.0);
@@ -1897,13 +2429,15 @@ void main() {
     level = nearLevel;
     palette = nearPalette;
     direct = false;
-    front = 1.0;
     float nearGlyph = floor(near.a * 255.0 + 0.5);
+    bool seeThrough = nearGlyph >= ${SEE_THROUGH}.0;
+    if (seeThrough) nearGlyph -= ${SEE_THROUGH}.0;
     if (nearGlyph > 0.0) glyph = nearGlyph;
+    if (!seeThrough) front = 1.0;
   }
 
   // The scene steps back under the text.
-  level = floor(level * texture2D(calmMap, uv).r + 0.5);
+  level = floor(level * mix(1.0, texture2D(calmMap, uv).r, calmAmount) + 0.5);
   vec3 color = direct
     ? tint * (0.45 + 0.55 * level / TOP)
     : texture2D(palettes, vec2((level + 0.5) / ${LEVELS}.0, (palette + 0.5) / ${PALETTES.length}.0)).rgb;
@@ -1944,8 +2478,8 @@ void main() {
 
 const SCENE_UNIFORMS = [
   "overlay", "foreground", "calmMap", "milky", "palettes", "earthMap", "grid", "cellSize", "margin", "time", "viewWidth",
-  "sun", "flicker", "rays", "transit", "hole", "ringWidth", "moon", "moonLight", "earth", "globe", "sunView",
-  "milkyWidth", "milkyOffset",
+  "sun", "flicker", "rays", "transit", "hole", "ringWidth", "moon", "moonSun", "earth", "globe", "sunView",
+  "milkyWidth", "milkyOffset", "calmAmount",
 ];
 const GLYPH_UNIFORMS = ["cells", "glyphs", "grid", "cell", "origin", "sun", "height"];
 
@@ -2049,15 +2583,6 @@ function drawQuad(corner) {
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
-// The direction from one projected object to the star, on screen.
-function lightFrom(object) {
-  const sun = seen.sun.visible ? seen.sun : home.sun;
-  const dx = sun.x - object.x;
-  const dy = sun.y - object.y;
-  const length = Math.hypot(dx, dy) || 1;
-  return [dx / length, dy / length];
-}
-
 function render(t) {
   const { sun, hole, moon, earth } = seen;
   const textures = gpu.textures;
@@ -2098,13 +2623,14 @@ function render(t) {
   // At small sizes the photon ring stays at least one cell wide.
   gl.uniform1f(s.ringWidth, Math.max(0.05, (cellW * 0.6) / Math.max(hole.r, 0.001)));
   gl.uniform4f(s.moon, moon.x, moon.y, moon.visible ? moon.r : 0, moon.fade);
-  gl.uniform2fv(s.moonLight, lightFrom(moon));
+  gl.uniform3fv(s.moonSun, moonSky.light);
   gl.uniform4f(s.earth, earth.x, earth.y, earth.visible && earthReady > 0 ? earth.r : 0, earth.fade * earthReady);
   gl.uniformMatrix3fv(s.globe, false, globeMatrix);
   gl.uniform3fv(s.sunView, sunView);
   gl.uniform1f(s.milkyWidth, milkyWidth);
   // The Milky Way is the farthest layer, so it drifts slowest of all.
   gl.uniform1f(s.milkyOffset, drift.travel * 0.25);
+  gl.uniform1f(s.calmAmount, calmAmount);
   drawQuad(gpu.scene.corner);
 
   // Pass 2: stamp the glyphs onto the screen.
@@ -2137,19 +2663,29 @@ function drawFrame(now) {
   drift.travel += drift.speed * dt;
   // The Earth fades in once its map has loaded.
   if (earthReady > 0) earthReady = Math.min(1, earthReady + dt / 0.8);
-  fly(dt);
-  returnHome(dt);
+  calmAmount += ((focus.body ? 0 : 1) - calmAmount) * (1 - Math.exp(-dt / 0.3));
+  if (focus.body) swingMoon(t);
+  placeMoon(Date.now());
+  placeSolarSystem(t);
+  if (focus.body) {
+    followFocus(t);
+  } else {
+    fly(dt);
+    returnHome(dt);
+  }
   projectScene();
+  projectBodies();
   turnGlobe(dt);
 
   overlay.fill(0);
   foreground.fill(0);
   drawStars(t, dt);
   drawLoner();
-  drawPlanets(t);
+  drawPlanets();
   drawInfall(dt);
   drawMeteors(dt);
   drawFlights(t);
+  placeWorldCard();
   render(t);
 }
 
@@ -2180,13 +2716,18 @@ function scheduleBuild() {
 }
 
 // A tap or click on a plane opens its card, and on the rest of the Earth
-// closes it; anywhere else it launches a shooting star toward the black
-// hole, aimed a little off-centre so it falls in on a spiral, speeding up as
-// it nears it.
+// closes it; on a planet or moon it flies there; anywhere else it launches a
+// shooting star toward the black hole, aimed a little off-centre so it falls
+// in on a spiral, speeding up as it nears it.
 function tap(x, y, reach) {
   const k = planeAt(x, y, reach);
   if (k >= 0) {
     pickPlane(k);
+    return;
+  }
+  const body = bodyAt(x, y, reach + 4);
+  if (body) {
+    visit(body);
     return;
   }
   if (onEarth(x, y)) {
@@ -2231,7 +2772,7 @@ function letGo(time) {
 }
 
 function pointAt(x, y) {
-  document.documentElement.style.cursor = hovered >= 0 ? "pointer" : onEarth(x, y) ? "grab" : "";
+  document.documentElement.style.cursor = hovered >= 0 || hoveredBody ? "pointer" : onEarth(x, y) ? "grab" : "";
 }
 
 // A press that barely moves counts as a tap, so swipes don't launch meteors.
@@ -2239,7 +2780,7 @@ function pointAt(x, y) {
 let press = null;
 window.addEventListener("pointerdown", (event) => {
   press = null;
-  if (event.target.closest?.("a, button, .flight")) return;
+  if (event.target.closest?.("a, button, .card")) return;
   press = { x: event.clientX, y: event.clientY, time: event.timeStamp };
   if (event.pointerType === "mouse" && event.button === 0 && onEarth(event.clientX, event.clientY)) {
     // Not a text selection.
@@ -2258,6 +2799,7 @@ window.addEventListener("pointermove", (event) => {
     return;
   }
   hovered = planeAt(event.clientX, event.clientY, MOUSE_REACH);
+  hoverWorld(hovered < 0 && !event.target.closest?.(".card") ? bodyAt(event.clientX, event.clientY, MOUSE_REACH + 4) : null);
   pointAt(event.clientX, event.clientY);
 }, { passive: true });
 window.addEventListener("pointerup", (event) => {
@@ -2277,6 +2819,7 @@ window.addEventListener("pointerup", (event) => {
 // sideways swipe that starts on the Earth turns it instead.
 window.addEventListener("wheel", (event) => {
   if (event.ctrlKey) return;
+  release();
   const px = -event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewHeight : 1);
   if (px > 0) {
     thrust.aimX = event.clientX;
@@ -2288,7 +2831,7 @@ let touch = null;
 window.addEventListener("touchstart", (event) => {
   const point = event.touches[0];
   touch = null;
-  if (!point || event.target.closest?.(".flight")) return;
+  if (!point || event.target.closest?.(".card")) return;
   const earth = onEarth(point.clientX, point.clientY) && !event.target.closest?.("a, button");
   touch = { x: point.clientX, y: point.clientY, mode: earth ? "undecided" : "fly" };
   thrust.aimX = point.clientX;
@@ -2302,8 +2845,12 @@ window.addEventListener("touchmove", (event) => {
     touch.mode = Math.abs(point.clientX - touch.x) > Math.abs(point.clientY - touch.y) ? "turn" : "fly";
     if (touch.mode === "turn") globe.drag = { x: touch.x, y: touch.y, time: event.timeStamp };
   }
-  if (touch.mode === "turn") dragGlobe(point.clientX, point.clientY, event.timeStamp);
-  else push((point.clientY - touch.y) * 1.2);
+  if (touch.mode === "turn") {
+    dragGlobe(point.clientX, point.clientY, event.timeStamp);
+  } else {
+    release();
+    push((point.clientY - touch.y) * 1.2);
+  }
   touch.x = point.clientX;
   touch.y = point.clientY;
 }, { passive: true });
