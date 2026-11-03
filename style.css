@@ -239,6 +239,93 @@ h2 {
   text-decoration-thickness: 2px;
 }
 
+/* A flight's card, drawn in characters: a box-drawn frame around its
+   details. It pops up beside the plane, which places it from script.
+   Lines sit as tall as a full block, so the frame and big letters join up. */
+.flight {
+  position: fixed;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.375rem;
+  background: rgba(0, 0, 0, 0.86);
+  backdrop-filter: blur(0.1875rem);
+  -webkit-backdrop-filter: blur(0.1875rem);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 0.75rem 2.5rem rgba(0, 0, 0, 0.6);
+  color: #dcdcd7;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.2;
+  animation: flight-open 0.18s ease-out;
+}
+
+@keyframes flight-open {
+  from {
+    opacity: 0;
+  }
+}
+
+.flight[hidden] {
+  display: none;
+}
+
+.flight-art {
+  white-space: pre;
+}
+
+.flight-art .frame {
+  color: #46484d;
+}
+
+.flight-art .bright {
+  color: #f6f6f2;
+}
+
+.flight-art .dim {
+  color: #8f908b;
+}
+
+.flight-art .faint {
+  color: #5d5f64;
+}
+
+.flight-art .gold {
+  color: #ffc24a;
+}
+
+.flight-art .live {
+  color: #6fdc9b;
+}
+
+/* Sits over the gap left for it in the frame's top edge. */
+.flight-close {
+  position: absolute;
+  top: 0.5rem;
+  right: calc(0.625rem + 3ch);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #8f908b;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+.flight-close:hover,
+.flight-close:focus-visible {
+  color: #fff;
+}
+
+.flight-summary {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 @media (max-width: 24rem) {
   .contributions-header {
     flex-direction: column;

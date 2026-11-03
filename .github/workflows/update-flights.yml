@@ -1,0 +1,51 @@
+name: Update flights
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-flights
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      # Every aircraft in the air that adsb.lol's receivers can hear, cut down
+      # to {"time": unix s, "planes": [[hex, callsign, lat, lon, altitude ft,
+      # ground speed kt, track°, climb ft/min, type, registration, age s], ...]}.
+      - name: Fetch live flights
+        run: |
+          curl -fsS --compressed --retry 3 --retry-all-errors --max-time 60 \
+            -o aircraft.json https://api.adsb.lol/v2/point/0/0/10800
+          jq -c '
+            {time: (.now / 1000 | floor),
+             planes: [.ac[]
+               | select(.lat != null and .lon != null and (.alt_baro | type) == "number"
+                   and (.gs // 0) >= 40 and (.seen_pos // 60) < 60)
+               | [.hex, (.flight // "" | sub("\\s+$"; "")),
+                  (.lat * 100 | round / 100), (.lon * 100 | round / 100),
+                  (.alt_baro / 25 | round * 25), (.gs | round), (.track // 0 | round),
+                  (.baro_rate // .geom_rate // 0 | round), (.t // ""), (.r // ""), (.seen_pos | round)]]}' \
+            aircraft.json > flights.json
+          jq -e '.planes | length > 500' flights.json > /dev/null
+
+      # The snapshot lives alone on the flights branch, replaced each time, so
+      # the site's history stays clean.
+      - name: Publish to the flights branch
+        run: |
+          git init -q -b flights
+          git add flights.json
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qm "Update flights"
+          gh auth setup-git
+          git push -fq "https://github.com/$GITHUB_REPOSITORY.git" flights
