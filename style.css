@@ -15,6 +15,9 @@
 
 html {
   min-width: 320px;
+  /* Scrolling flies through the scene, so the page itself never bounces or
+     pulls to refresh. */
+  overscroll-behavior: none;
 }
 
 body {
