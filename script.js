@@ -981,10 +981,16 @@ window.addEventListener("pointerdown", (event) => {
     if (quakes.length > 4) quakes.shift();
     return;
   }
-  // A shooting star streaks away from the click, down toward the planet.
-  const speed = Math.max(viewWidth, viewHeight) * 0.65;
-  const angle = Math.PI * 0.82 + (Math.random() - 0.5) * 0.4;
-  const meteor = { x: event.clientX, y: event.clientY, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, age: 0 };
+  // A shooting star streaks from the click toward the black hole, aimed a
+  // little off-centre so it falls in on a spiral, and fast enough to reach it.
+  const aimAngle = Math.random() * Math.PI * 2;
+  const aimX = hole.x + Math.cos(aimAngle) * hole.r * 1.2;
+  const aimY = hole.y + Math.sin(aimAngle) * hole.r * 1.2;
+  const dx = aimX - event.clientX;
+  const dy = aimY - event.clientY;
+  const distance = Math.hypot(dx, dy) || 1;
+  const speed = Math.max(Math.max(viewWidth, viewHeight) * 0.65, distance / 0.9);
+  const meteor = { x: event.clientX, y: event.clientY, vx: (dx / distance) * speed, vy: (dy / distance) * speed, age: 0 };
   captureMeteor(meteor);
   meteors.push(meteor);
 }, { passive: true });
