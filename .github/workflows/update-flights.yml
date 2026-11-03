@@ -1,8 +1,9 @@
 name: Update flights
 
-# Each run publishes a fresh snapshot, waits, then starts the next one, so the
-# flights stay a few minutes old even when GitHub runs scheduled workflows
-# hours late. The schedule only restarts the chain if it ever breaks.
+# Each run queues the next one, publishes a fresh snapshot, then waits a few
+# minutes before handing over, so the flights stay a few minutes old even
+# when GitHub runs scheduled workflows hours late. The schedule only restarts
+# the chain if it ever breaks.
 on:
   schedule:
     - cron: "*/30 * * * *"
@@ -12,10 +13,11 @@ permissions:
   contents: write
   actions: write
 
-# A newer run replaces an older one, so only one chain is ever going.
+# One run at a time; a queued run waits its turn, and a newer one replaces
+# it, so only one chain is ever going.
 concurrency:
   group: update-flights
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   update:
@@ -24,6 +26,10 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      # First, so the chain carries on even if this run fails.
+      - name: Queue the next update
+        run: gh workflow run update-flights.yml --repo "$GITHUB_REPOSITORY" --ref main
+
       # Every aircraft in the air that adsb.lol's receivers can hear, cut down
       # to {"time": unix s, "planes": [[hex, callsign, lat, lon, altitude ft,
       # ground speed kt, track°, climb ft/min, type, registration, age s], ...]}.
@@ -55,9 +61,6 @@ jobs:
           gh auth setup-git
           git push -fq "https://github.com/$GITHUB_REPOSITORY.git" flights
 
-      # Even after a failed fetch, so one bad minute doesn't end the chain.
-      - name: Start the next update
+      - name: Wait before handing over
         if: ${{ !cancelled() }}
-        run: |
-          sleep 240
-          gh workflow run update-flights.yml --repo "$GITHUB_REPOSITORY" --ref main
+        run: sleep 240
