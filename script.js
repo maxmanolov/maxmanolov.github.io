@@ -133,6 +133,11 @@ const meteors = [];
 // A swallowed meteor takes this long to spiral in, winding this many extra turns.
 const SPIRAL_TIME = 1.8;
 const SPIRAL_TURNS = 1.5;
+// Meteor flights are simulated in steps of this many seconds.
+const METEOR_STEP = 1 / 240;
+// Meteor fall strength (2G, in px³/s² on a 900 px tall screen): about 400 px/s
+// at 1,000 px from the black hole, 2,000 px/s as it reaches the shadow.
+const METEOR_PULL = 1.6e8;
 // The star's planets: tiny worlds on tilted orbits (sizes and orbits in star
 // radii), revolving very slowly, with periods set by Kepler's third law.
 const ORBIT_SQUASH = 0.3;
@@ -625,8 +630,13 @@ function buildScene() {
 const meteorPoint = { x: 0, y: 0, size: 1 };
 function meteorAt(meteor, age) {
   if (meteor.capturedAt < 0 || age <= meteor.capturedAt) {
-    meteorPoint.x = meteor.x + meteor.vx * age;
-    meteorPoint.y = meteor.y + meteor.vy * age;
+    // Replay the simulated flight, blending between its steps.
+    const last = meteor.path.length / 2 - 1;
+    const step = Math.min(last, Math.max(0, age / METEOR_STEP));
+    const k = Math.min(last - 1, Math.floor(step));
+    const blend = Math.max(0, step - k);
+    meteorPoint.x = meteor.path[k * 2] + (meteor.path[k * 2 + 2] - meteor.path[k * 2]) * blend;
+    meteorPoint.y = meteor.path[k * 2 + 1] + (meteor.path[k * 2 + 3] - meteor.path[k * 2 + 1]) * blend;
     meteorPoint.size = 1;
     return meteorPoint;
   }
@@ -640,33 +650,47 @@ function meteorAt(meteor, age) {
   return meteorPoint;
 }
 
-// Works out whether a meteor's straight path enters the black hole's shadow
-// during its flight, and if so when, where and which way it will circle.
-function captureMeteor(meteor) {
+// Flies a meteor toward the black hole. Its speed depends only on how close it
+// is, √(2G/d), like something falling in from far away, so every meteor
+// moves the same at the same distance: slow far out, faster and faster in.
+// Gravity also bends its path. The flight is simulated once at launch; when it
+// reaches the shadow it is captured and spirals in from there.
+function launchMeteor(meteor) {
+  // G scales with the screen so a fall looks the same on a phone and a desktop.
+  const scale = Math.min(viewWidth, viewHeight) / 900;
+  const twoG = METEOR_PULL * scale * scale * scale;
+  const gravity = twoG / 2;
+  const capture = hole.r * SHADOW;
+  const path = [meteor.x, meteor.y];
+  let x = meteor.x - hole.x;
+  let y = meteor.y - hole.y;
+  let vx = meteor.vx;
+  let vy = meteor.vy;
   meteor.capturedAt = -1;
-  const radius = hole.r * SHADOW;
-  const ox = meteor.x - hole.x;
-  const oy = meteor.y - hole.y;
-  const a = meteor.vx * meteor.vx + meteor.vy * meteor.vy;
-  const b = 2 * (ox * meteor.vx + oy * meteor.vy);
-  const c = ox * ox + oy * oy - radius * radius;
-  let entry;
-  if (c <= 0) entry = 0;
-  else {
-    const disc = b * b - 4 * a * c;
-    if (disc < 0) return;
-    entry = (-b - Math.sqrt(disc)) / (2 * a);
-    if (entry < 0 || entry > 1.2) return;
+  for (let step = 1; step <= 5 / METEOR_STEP; step++) {
+    const d = Math.hypot(x, y);
+    if (d <= capture) {
+      meteor.capturedAt = (step - 1) * METEOR_STEP;
+      meteor.captureRadius = Math.max(hole.r * 0.5, d);
+      meteor.captureAngle = Math.atan2(y, x);
+      // Circle the same way the meteor was already moving around the hole,
+      // carrying on at the speed it arrived with.
+      const cross = x * vy - y * vx;
+      meteor.spin = cross >= 0 ? 1 : -1;
+      meteor.entrySpin = Math.min(9, Math.abs(cross) / (meteor.captureRadius * meteor.captureRadius));
+      break;
+    }
+    const pull = gravity / (d * d * d);
+    vx -= x * pull * METEOR_STEP;
+    vy -= y * pull * METEOR_STEP;
+    const speed = Math.sqrt(twoG / d) / (Math.hypot(vx, vy) || 1);
+    vx *= speed;
+    vy *= speed;
+    x += vx * METEOR_STEP;
+    y += vy * METEOR_STEP;
+    path.push(hole.x + x, hole.y + y);
   }
-  const ex = ox + meteor.vx * entry;
-  const ey = oy + meteor.vy * entry;
-  meteor.capturedAt = entry;
-  meteor.captureRadius = Math.max(hole.r * 0.5, Math.hypot(ex, ey));
-  meteor.captureAngle = Math.atan2(ey, ex);
-  // Circle the same way the meteor was already moving around the hole.
-  const cross = ex * meteor.vy - ey * meteor.vx;
-  meteor.spin = cross >= 0 ? 1 : -1;
-  meteor.entrySpin = Math.min(6, Math.abs(cross) / (meteor.captureRadius * meteor.captureRadius));
+  meteor.path = Float32Array.from(path);
 }
 
 // Extra light an earthquake adds to a surface cell: a flash at the epicentre
@@ -1123,17 +1147,16 @@ window.addEventListener("pointerdown", (event) => {
     if (quakes.length > 4) quakes.shift();
     return;
   }
-  // A shooting star streaks from the click toward the black hole, aimed a
-  // little off-centre so it falls in on a spiral, and fast enough to reach it.
+  // A shooting star sets off from the click toward the black hole, aimed a
+  // little off-centre so it falls in on a spiral, speeding up as it nears it.
   const aimAngle = Math.random() * Math.PI * 2;
   const aimX = hole.x + Math.cos(aimAngle) * hole.r * 1.2;
   const aimY = hole.y + Math.sin(aimAngle) * hole.r * 1.2;
   const dx = aimX - event.clientX;
   const dy = aimY - event.clientY;
   const distance = Math.hypot(dx, dy) || 1;
-  const speed = Math.max(Math.max(viewWidth, viewHeight) * 0.65, distance / 0.9);
-  const meteor = { x: event.clientX, y: event.clientY, vx: (dx / distance) * speed, vy: (dy / distance) * speed, age: 0 };
-  captureMeteor(meteor);
+  const meteor = { x: event.clientX, y: event.clientY, vx: dx / distance, vy: dy / distance, age: 0 };
+  launchMeteor(meteor);
   meteors.push(meteor);
 }, { passive: true });
 window.addEventListener("resize", scheduleBuild);
