@@ -912,9 +912,11 @@ function drawMeteors(dt) {
 // ground speed kt, track°, climb ft/min, type, registration, age s], ...]}.
 const FLIGHTS_URL = "https://raw.githubusercontent.com/maxmanolov/maxmanolov.github.io/flights/flights.json";
 const FLIGHTS_REFRESH = 150000;
-// Each plane flies on along its track from its last report, for at most
-// this many seconds.
-const FLIGHT_STALE = 1800;
+// Each plane flies on along its track from its last report for at most
+// FLIGHT_COAST seconds, then holds there, so a late update leaves it near
+// where it was; after FLIGHT_STALE seconds without news it is dropped.
+const FLIGHT_COAST = 1200;
+const FLIGHT_STALE = 7200;
 // Airlines, routes and aircraft, looked up when a plane is picked.
 const ADSBDB_URL = "https://api.adsbdb.com/v0/";
 const EARTH_KM = 6371;
@@ -1051,9 +1053,9 @@ function moveFlights() {
     // A plane low down and descending has most likely landed by now.
     const landed = f.climb[k] < -250 && f.altitude[k] + (f.climb[k] * elapsed) / 60 < 0;
     f.live[k] = elapsed < FLIGHT_STALE && !landed ? 1 : 0;
-    advance(f.fix, f.course, k * 3, f.speed[k], elapsed, f.at, f.toward, k * 3);
+    advance(f.fix, f.course, k * 3, f.speed[k], Math.min(elapsed, FLIGHT_COAST), f.at, f.toward, k * 3);
   }
-  if (picked) advance(picked.fix, picked.course, 0, picked.speed, now - picked.reported, picked.at, picked.toward, 0);
+  if (picked) advance(picked.fix, picked.course, 0, picked.speed, Math.min(now - picked.reported, FLIGHT_COAST), picked.at, picked.toward, 0);
 }
 
 // The plane on show whose characters a point on screen falls on (or within
