@@ -69,7 +69,7 @@ const calmTargets = [".intro h1", ".intro p", ".contributions", ".socials"].map(
 
 // Glyphs from empty to dense; a cell's brightness picks its glyph and colour.
 const RAMP = " .,:;-=+*x%#@";
-const LEVELS = 64;
+const LEVELS = 32;
 // Brightness → colour, from deep space red through orange to white-hot.
 // Each palette maps brightness to colour. A cell stores its palette in the
 // top two bits of its byte and its brightness level in the low six.
@@ -77,6 +77,7 @@ const SKY_PALETTE = 0;
 const WATER_PALETTE = 1;
 const LAND_PALETTE = 2;
 const HOLE_PALETTE = 3;
+const MILKY_PALETTE = 4;
 const PALETTES = [
   // Sky and star: deep space red through orange to white-hot.
   [[0, 8, 2, 1], [0.2, 74, 20, 7], [0.45, 176, 64, 22], [0.7, 242, 134, 62], [0.88, 255, 204, 146], [1, 255, 246, 228]],
@@ -86,9 +87,14 @@ const PALETTES = [
   [[0, 3, 10, 4], [0.25, 16, 62, 22], [0.5, 46, 132, 48], [0.72, 110, 190, 72], [0.88, 196, 222, 128], [1, 246, 250, 226]],
   // Black hole: deep purple through violet and lavender to white.
   [[0, 6, 2, 14], [0.25, 46, 14, 92], [0.5, 112, 50, 196], [0.72, 176, 122, 244], [0.88, 222, 196, 255], [1, 255, 252, 255]],
+  // Milky Way: cool, pale starlight.
+  [[0, 3, 3, 6], [0.1, 18, 20, 32], [0.2, 42, 46, 66], [0.35, 100, 106, 136], [0.6, 192, 198, 218], [1, 255, 255, 255]],
 ];
-const PALETTE_SHIFT = 6;
-const LEVEL_MASK = 63;
+// A cell's byte holds its palette in the top three bits and brightness in the low five.
+const PALETTE_SHIFT = 5;
+const LEVEL_MASK = 31;
+// The Milky Way repeats every this many screen widths as the camera travels.
+const MILKY_SPAN = 2.5;
 // The share of the surface that is ocean, roughly Earth's.
 const OCEAN_SHARE = 0.62;
 let seaLevel = 0.5;
@@ -174,6 +180,9 @@ let groundColumn = new Float32Array(0);
 let groundRow = new Uint16Array(0);
 let terrainStrip = new Float32Array(0);
 let stripWidth = 1;
+// The Milky Way: a wrapped strip of faint glow and dense tiny stars, in cells.
+let milkyStrip = new Float32Array(0);
+let milkyWidth = 1;
 let falloff = new Float32Array(0);
 let rimGlow = new Float32Array(0);
 let cellX = new Float32Array(0);
@@ -541,6 +550,25 @@ function buildScene() {
     }
   }
 
+  // The Milky Way arcs gently across the sky: a soft band of glow with a
+  // darker dust lane down its middle, sprinkled with dense, dim stars.
+  milkyWidth = 48 * Math.ceil((cols * MILKY_SPAN) / 48);
+  milkyStrip = new Float32Array(milkyWidth * rows);
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < milkyWidth; column++) {
+      const phase = (column / milkyWidth) * Math.PI * 2;
+      const centre = rows * (0.4 + 0.22 * Math.sin(phase));
+      const across = (row - centre) / (rows * 0.11);
+      const band = Math.exp(-across * across);
+      const clouds = wrappedFbm(column / 40, row / 18, 83, milkyWidth / 40);
+      const laneOffset = (across - 0.15) * 4;
+      const lane = Math.exp(-laneOffset * laneOffset) * clamp((wrappedNoise(column / 30, row / 12, 89, milkyWidth / 30) - 0.35) * 2, 0, 1);
+      const glow = band * (0.45 + 0.75 * clouds) * (1 - 0.7 * lane);
+      const star = hash(column, row, 97) < 0.09 * band ? 0.22 + 0.22 * hash(column, row, 101) : 0;
+      milkyStrip[row * milkyWidth + column] = Math.max(glow * 0.2, star);
+    }
+  }
+
   // Sea level sits at the terrain height that floods OCEAN_SHARE of the planet.
   const heights = Float32Array.from(terrainStrip).sort();
   seaLevel = heights[Math.floor(heights.length * OCEAN_SHARE)] || 0.5;
@@ -617,7 +645,11 @@ function quakeLight(quake, x, y, t) {
 
 // Raises a cell's brightness level, keeping its palette.
 function brighten(value, level) {
-  return (value & ~LEVEL_MASK) | Math.max(value & LEVEL_MASK, Math.min(level, LEVEL_MASK));
+  const current = value & LEVEL_MASK;
+  if (level <= current) return value;
+  // A star or meteor passing over the Milky Way takes the sky's colours.
+  const palette = value >> PALETTE_SHIFT;
+  return ((palette === MILKY_PALETTE ? SKY_PALETTE : palette) << PALETTE_SHIFT) | Math.min(level, LEVEL_MASK);
 }
 
 // Light from one star cell (0 when there is no star), twinkling on its own clock.
@@ -657,6 +689,10 @@ function lightCells(t, dt) {
   const farBlend = farTravel - farStep;
   const nearBlend = nearTravel - nearStep;
   const spinColumns = camera.spin * 4;
+  // The Milky Way is the farthest layer, so it drifts slowest of all.
+  const milkyTravel = camera.travel * 0.25;
+  const milkyStep = Math.floor(milkyTravel);
+  const milkyBlend = milkyTravel - milkyStep;
   const cells = cols * rows;
 
   for (let i = 0; i < cells; i++) {
@@ -688,8 +724,18 @@ function lightCells(t, dt) {
           lum = Math.max(lum, far, near);
         }
       }
-      skyLevel = ((Math.min(1, lum * calm[i]) * top + 0.5) | 0)
-        | ((holeKind[i] ? HOLE_PALETTE : SKY_PALETTE) << PALETTE_SHIFT);
+      let skyPalette = holeKind[i] ? HOLE_PALETTE : SKY_PALETTE;
+      if (!holeKind[i] && lum < 0.4) {
+        const base = ((i / cols) | 0) * milkyWidth;
+        const left = ((((i % cols) + milkyStep) % milkyWidth) + milkyWidth) % milkyWidth;
+        const right = (left + 1) % milkyWidth;
+        const milky = milkyStrip[base + left] * (1 - milkyBlend) + milkyStrip[base + right] * milkyBlend;
+        if (milky > lum) {
+          lum = milky;
+          skyPalette = MILKY_PALETTE;
+        }
+      }
+      skyLevel = ((Math.min(1, lum * calm[i]) * top + 0.5) | 0) | (skyPalette << PALETTE_SHIFT);
     }
     skyLevels[i] = skyLevel;
 
@@ -822,8 +868,8 @@ vec4 glyphAt(vec2 p, vec2 origin, sampler2D cells, out float level) {
   vec2 g = (p - origin) / cell;
   vec2 index = floor(g);
   float value = floor(texture2D(cells, (index + 0.5) / grid).r * 255.0 + 0.5);
-  float palette = floor(value / 64.0);
-  level = value - palette * 64.0;
+  float palette = floor(value / 32.0);
+  level = value - palette * 32.0;
   vec2 local = g - index;
   return texture2D(glyphs, vec2((level + local.x) / levels, (palette + local.y) / palettes));
 }
