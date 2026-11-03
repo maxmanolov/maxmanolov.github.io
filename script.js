@@ -1470,7 +1470,7 @@ function renderCard() {
     spread("position", `${Math.abs(lat).toFixed(1)}°${lat >= 0 ? "N" : "S"} ${Math.abs(lon).toFixed(1)}°${lon >= 0 ? "E" : "W"}`, "dim");
   }
   add([""]);
-  spread("adsb.lol · adsbdb", ageText(now / 1000 - plane.reported), "faint", "faint");
+  spread("", ageText(now / 1000 - plane.reported), "", "faint");
 
   // The top edge carries the callsign, and leaves a gap for the close button.
   const title = ` ${callsign} `;
