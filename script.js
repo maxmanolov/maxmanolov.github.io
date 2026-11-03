@@ -126,6 +126,15 @@ const meteors = [];
 // A swallowed meteor takes this long to spiral in, winding this many extra turns.
 const SPIRAL_TIME = 1.8;
 const SPIRAL_TURNS = 1.5;
+// Earthquakes from clicks on the planet: a fast faint P wave and a slower,
+// stronger S wave ring out from the epicentre while the planet shakes.
+const quakes = [];
+const QUAKE_LIFE = 1.8;
+const P_WAVE = 380;
+const S_WAVE = 230;
+// The waves die out with distance, so a quake stays local.
+const QUAKE_REACH = 170;
+const shake = { x: 0, y: 0 };
 // Infall strength (in horizon radii and seconds) and the spin stars pick up.
 const INFALL_PULL = 5;
 const INFALL_SPIN = 10;
@@ -592,6 +601,20 @@ function captureMeteor(meteor) {
   meteor.entrySpin = Math.min(6, Math.abs(cross) / (meteor.captureRadius * meteor.captureRadius));
 }
 
+// Extra light an earthquake adds to a surface cell: a flash at the epicentre
+// and two flickering rings, all fading as the quake dies down.
+function quakeLight(quake, x, y, t) {
+  const distance = Math.hypot(x - quake.x, y - quake.y);
+  const fade = Math.pow(1 - quake.age / QUAKE_LIFE, 1.5);
+  if (distance > QUAKE_REACH * 3) return 0;
+  const p = (distance - quake.age * P_WAVE) / 7;
+  const sWave = (distance - quake.age * S_WAVE) / 11;
+  const flicker = 0.75 + 0.25 * Math.sin(t * 40 + x * 0.7 + y * 0.5);
+  const waves = (0.15 * Math.exp(-p * p) + 0.4 * Math.exp(-sWave * sWave) * flicker) * Math.exp(-distance / QUAKE_REACH);
+  const flash = Math.exp(-distance / 14) * Math.exp(-quake.age * 4) * 0.55;
+  return (waves + flash) * fade;
+}
+
 // Raises a cell's brightness level, keeping its palette.
 function brighten(value, level) {
   return (value & ~LEVEL_MASK) | Math.max(value & LEVEL_MASK, Math.min(level, LEVEL_MASK));
@@ -700,6 +723,7 @@ function lightCells(t, dt) {
           surface = 0.5 + 0.8 * (terrain - seaLevel) + sparkle;
         }
         lum = 0.04 + 1.05 * lit * falloff[i] * surface + rimGlow[i] * (0.3 + 0.7 * Math.max(0, facing));
+        for (const quake of quakes) lum += quakeLight(quake, cellX[i], cellY[i], t);
       }
       groundLevel = ((Math.min(1, lum * calm[i]) * top + 0.5) | 0) | (palette << PALETTE_SHIFT);
     }
@@ -893,13 +917,22 @@ function drawFrame(now) {
   camera.travel += camera.speed * dt;
   // The planet turns slowly under the camera, in step with its speed.
   camera.spin += camera.speed * dt * 0.035;
+  // Quakes age out, and the planet jolts hardest right after one starts.
+  let jolt = 0;
+  for (let k = quakes.length - 1; k >= 0; k--) {
+    quakes[k].age += dt;
+    if (quakes[k].age > QUAKE_LIFE) quakes.splice(k, 1);
+    else jolt = Math.max(jolt, 2.5 * Math.exp(-quakes[k].age * 6));
+  }
+  shake.x = (Math.random() * 2 - 1) * jolt;
+  shake.y = (Math.random() * 2 - 1) * jolt * 0.7;
   lightCells(seconds, dt);
 
   const ratio = pixelRatio;
   const skyX = -parallax.x * 4;
   const skyY = -parallax.y * 3;
-  const groundX = -parallax.x * 14;
-  const groundY = -parallax.y * 10;
+  const groundX = -parallax.x * 14 + shake.x;
+  const groundY = -parallax.y * 10 + shake.y;
   const u = gpu.uniforms;
   gl.viewport(0, 0, space.width, space.height);
   for (const [unit, texture, data] of [[0, gpu.textures.sky, skyLevels], [1, gpu.textures.ground, groundLevels]]) {
@@ -942,6 +975,12 @@ function scheduleBuild() {
 }
 
 window.addEventListener("pointerdown", (event) => {
+  // A click on the planet sets off an earthquake there instead of a meteor.
+  if (Math.hypot(event.clientX - planet.x, event.clientY - planet.y) < planet.r) {
+    quakes.push({ x: event.clientX, y: event.clientY, age: 0 });
+    if (quakes.length > 4) quakes.shift();
+    return;
+  }
   // A shooting star streaks away from the click, down toward the planet.
   const speed = Math.max(viewWidth, viewHeight) * 0.65;
   const angle = Math.PI * 0.82 + (Math.random() - 0.5) * 0.4;
