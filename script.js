@@ -59,9 +59,9 @@ fetch("contributions.json", { cache: "no-cache" })
 
 // ASCII universe in 3D: a star with its planets, a black hole, a moon and the
 // limb of an Earth-like planet, drawn as a fine character grid. Every object
-// sits at its own depth. The camera drifts sideways through the stars, and
-// scrolling flies it toward whatever is under the cursor; scrolling back
-// retraces the way home, then pulls out further.
+// sits at its own depth. The camera drifts sideways through the stars;
+// scrolling up flies it toward whatever is under the cursor, and scrolling
+// down retraces the way home, then pulls out further.
 //
 // Each frame the CPU fills an overlay with small moving things (stars,
 // planets, meteors), one WebGL pass shades every character cell (the star,
@@ -1507,12 +1507,12 @@ window.addEventListener("pointerup", (event) => {
   tap(event.clientX, event.clientY);
 }, { passive: true });
 
-// Scrolling flies the camera: down toward the point under the cursor, up back
-// the way it came. On touch screens, swiping up flies toward where the finger
-// went down.
+// Scrolling flies the camera: up toward the point under the cursor, down back
+// the way it came. On touch screens the scrolling gestures do the same:
+// dragging down (scrolling up) flies toward where the finger went down.
 window.addEventListener("wheel", (event) => {
   if (event.ctrlKey) return;
-  const px = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewHeight : 1);
+  const px = -event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewHeight : 1);
   if (px > 0) {
     thrust.aimX = event.clientX;
     thrust.aimY = event.clientY;
@@ -1530,7 +1530,7 @@ window.addEventListener("touchstart", (event) => {
 window.addEventListener("touchmove", (event) => {
   const touch = event.touches[0];
   if (!touch || touchY === null) return;
-  push((touchY - touch.clientY) * 1.2);
+  push((touch.clientY - touchY) * 1.2);
   touchY = touch.clientY;
 }, { passive: true });
 window.addEventListener("touchend", () => {
