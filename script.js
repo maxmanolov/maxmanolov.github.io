@@ -178,7 +178,7 @@ let skyBase = new Float32Array(0);
 let holeKind = new Uint8Array(0);
 let holeAngle = new Float32Array(0);
 let holeRadius = new Float32Array(0);
-// Cells drawn in the moon's grey: 1 the moon itself, 2 a dotted planet orbit.
+// Cells covered by the moon.
 let moonCell = new Uint8Array(0);
 let rayId = new Int8Array(0);
 let rayLight = new Float32Array(0);
@@ -578,23 +578,6 @@ function buildScene() {
     }
   }
 
-  // Faint dotted orbits, so the planets read as one system.
-  for (const world of PLANETS) {
-    const radius = world.orbit * sun.r;
-    const steps = Math.ceil(radius * 2.4);
-    for (let k = 0; k < steps; k += 3) {
-      const angle = (k / steps) * Math.PI * 2;
-      const point = orbitPoint(radius, angle);
-      const c = Math.floor(((point.x + MARGIN) * pixelRatio) / cellPxW);
-      const r = Math.floor(((point.y + MARGIN) * pixelRatio) / cellPxH);
-      if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
-      const i = r * cols + c;
-      if (!(kind[i] & SKY) || holeKind[i] || moonCell[i] || skyBase[i] >= 0.2) continue;
-      moonCell[i] = 2;
-      skyBase[i] = 0.24;
-    }
-  }
-
   // The terrain strip covers only the depths that are actually on screen.
   let stripRows = 1;
   for (let i = 0; i < cells; i++) {
@@ -736,7 +719,7 @@ function drawPlanets(t, top) {
       for (let c = c0; c <= c1; c++) {
         if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
         const i = r * cols + c;
-        if (!(kind[i] & SKY) || holeKind[i] || moonCell[i] === 1) continue;
+        if (!(kind[i] & SKY) || holeKind[i] || moonCell[i]) continue;
         const dx = cellX[i] - px;
         const dy = cellY[i] - py;
         // Tiny worlds still claim the one cell they sit in.
