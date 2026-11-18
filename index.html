@@ -3,107 +3,66 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta
-      name="description"
-      content="Max Manolov studies computer science at Stanford with a focus on machine learning systems."
-    >
-    <meta name="theme-color" content="#000">
+    <meta name="description" content="Max Manolov is an AI researcher and the co-founder and CTO of Superaligned.">
+    <meta name="theme-color" content="#ffffff">
     <title>Max Manolov</title>
 
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://maxmanolov.com/">
     <meta property="og:title" content="Max Manolov">
-    <meta
-      property="og:description"
-      content="Max Manolov studies computer science at Stanford with a focus on machine learning systems."
-    >
-    <meta property="og:image" content="https://maxmanolov.com/og.png?v=2">
-    <meta property="og:image:width" content="1200">
-    <meta property="og:image:height" content="630">
-    <meta property="og:image:alt" content="Max Manolov's name beside an ASCII Earth with live flights over it, a star and a black hole.">
-    <meta name="twitter:card" content="summary_large_image">
+    <meta property="og:description" content="Max Manolov is an AI researcher and the co-founder and CTO of Superaligned.">
+    <meta property="og:image" content="https://maxmanolov.com/photo.jpg">
+    <meta property="og:image:width" content="800">
+    <meta property="og:image:height" content="800">
+    <meta property="og:image:alt" content="Portrait of Max Manolov">
+    <meta name="twitter:card" content="summary">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-      href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    >
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
-    <script src="script.js" defer></script>
   </head>
   <body>
-    <canvas id="space" aria-hidden="true"></canvas>
+    <header>
+      <h1>Max Manolov</h1>
+    </header>
+
     <main>
-      <section class="intro" aria-labelledby="intro-title">
-        <h1 id="intro-title">Max Manolov</h1>
+      <img class="portrait" src="photo.jpg" width="800" height="800" alt="Portrait of Max Manolov">
+
+      <div class="bio">
+        <p>I am an AI researcher from the United States.</p>
         <p>
-          I study computer science at Stanford with a focus on machine learning
-          systems. I’m interested in GPUs, distributed training and inference,
-          compilers and accelerators, and reinforcement learning.
+          I am currently the co-founder and CTO of <a href="https://superaligned.com" target="_blank" rel="noreferrer">Superaligned</a>. My singular
+          mission is aligning superintelligence to safely power the global economy.
         </p>
-      </section>
+        <p>
+          Before that, I competed in the
+          <a href="https://en.wikipedia.org/wiki/United_States_of_America_Mathematical_Olympiad" target="_blank" rel="noreferrer">USA Mathematical Olympiad</a>
+          and led software for
+          <a href="https://www.team254.com" target="_blank" rel="noreferrer">FRC Team 254</a>,
+          which just finished fourth in the world at the 2026 FIRST Robotics
+          Championship.
+        </p>
+        <p>
+          I am also part of the Stanford Artificial Intelligence Laboratory (SAIL)
+          and am currently on leave from my undergraduate computer science degree at Stanford University.
+        </p>
 
-      <section class="contributions" aria-labelledby="contributions-title">
-        <header class="contributions-header">
-          <div>
-            <h2 id="contributions-title">GitHub contributions</h2>
-            <p id="contribution-summary">Contributions in the last three months</p>
-          </div>
-          <a href="https://github.com/maxmanolov" target="_blank" rel="noreferrer">
-            @maxmanolov
-          </a>
-        </header>
-
-        <div class="graph-wrap">
-          <div class="months" aria-hidden="true"></div>
-          <div
-            id="graph"
-            class="graph"
-            role="grid"
-            aria-label="GitHub contributions over the last three months"
-          ></div>
-        </div>
-
-        <div class="legend" aria-label="Contribution intensity legend">
-          <span>Less</span>
-          <i data-level="0"></i>
-          <i data-level="1"></i>
-          <i data-level="2"></i>
-          <i data-level="3"></i>
-          <i data-level="4"></i>
-          <span>More</span>
-        </div>
-      </section>
-
-      <nav class="socials" aria-label="Social profiles">
-        <a href="https://github.com/maxmanolov" target="_blank" rel="noreferrer" aria-label="GitHub">
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
-          </svg>
-        </a>
-        <a href="https://www.linkedin.com/in/maxmanolov" target="_blank" rel="noreferrer" aria-label="LinkedIn">
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
-          </svg>
-        </a>
-        <a href="https://x.com/maxmanolov" target="_blank" rel="noreferrer" aria-label="X">
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <nav class="links" aria-label="Social profiles">
+          <a href="https://x.com/maxmanolov" target="_blank" rel="noreferrer"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z"/>
-          </svg>
-        </a>
-      </nav>
+          </svg><span>X</span></a>
+          <span class="sep" aria-hidden="true">/</span>
+          <a href="https://www.linkedin.com/in/maxmanolov" target="_blank" rel="noreferrer"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+          </svg><span>LinkedIn</span></a>
+          <span class="sep" aria-hidden="true">/</span>
+          <a href="https://github.com/maxmanolov" target="_blank" rel="noreferrer"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
+          </svg><span>GitHub</span></a>
+        </nav>
+      </div>
     </main>
-
-    <aside class="card flight" aria-label="Flight" hidden>
-      <p class="card-summary"></p>
-      <div class="card-art" aria-hidden="true"></div>
-      <button class="card-close" type="button" aria-label="Close">[×]</button>
-    </aside>
-
-    <aside class="card world" aria-label="Planet" hidden>
-      <div class="card-art"></div>
-      <button class="card-close" type="button" aria-label="Close">[×]</button>
-    </aside>
   </body>
 </html>
