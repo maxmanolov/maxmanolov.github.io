@@ -32,8 +32,8 @@ h1 {
 
 main {
   display: grid;
-  grid-template-columns: minmax(0, 27rem) minmax(0, 34rem);
-  gap: 6.5rem;
+  grid-template-columns: minmax(0, 18rem) minmax(0, 34rem);
+  gap: 5rem;
   justify-content: center;
   align-items: start;
   padding: 8rem 2.75rem 6rem;
@@ -95,6 +95,6 @@ a:hover { color: var(--text); }
     padding: 2.5rem 1rem 4rem;
     max-width: 36rem;
   }
-  .portrait { max-width: 20rem; }
+  .portrait { max-width: 14rem; }
   body { font-size: 1.25rem; }
 }
