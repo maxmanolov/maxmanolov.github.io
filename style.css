@@ -96,6 +96,7 @@ a:hover { color: var(--text); }
     gap: 1.5rem;
     padding: 3rem 1rem 4rem;
     max-width: 36rem;
+    margin: 0 auto;
   }
   .portrait { max-width: 12rem; }
   .portrait, .bio { grid-column: 1; }
